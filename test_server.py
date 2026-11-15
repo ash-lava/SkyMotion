@@ -1,6 +1,7 @@
 """Offline regression tests: python -m unittest -v test_server.py"""
 import importlib.util
 import io
+from urllib.parse import urlparse, parse_qs
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,7 +36,7 @@ class ArchiveTests(unittest.TestCase):
             rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4)
         self.assertEqual(total,10);self.assertEqual([r['id'] for r in rows],['0','3','6','9']);self.assertEqual(live,['spherex_dr1']);self.assertEqual(warnings,[])
     def test_partial_outage_keeps_working_collection(self):
-        def table(ra,dec,radius,collection):
+        def table(ra,dec,radius,collection,**kwargs):
             if collection=='spherex_qr3':raise archive.ArchiveError('HTTP 502')
             return [row()],False
         with patch.object(archive,'get_table',side_effect=table),patch.object(archive,'COLLECTIONS',('spherex_dr1','spherex_qr3')),patch.object(archive,'tap_rows',side_effect=archive.ArchiveError('TAP unavailable')):
@@ -71,7 +72,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.2');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.3');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -97,6 +98,15 @@ class APITests(unittest.TestCase):
         with patch.object(archive,'search',return_value=([{'url':URL,'id':'1'}],1,['partial'],['spherex_dr1'],{'spherex_qr3':'502'})) as query:
             self.client.get('/api/observations?ra=1&dec=0');self.client.get('/api/observations?ra=1&dec=0')
         self.assertEqual(query.call_count,2)
+    def test_limited_live_sample_is_cached_but_refresh_bypasses_it(self):
+        table,limited=archive.read_sia_csv((Path(__file__).parent/'tests/fixtures/sia-m101-four.csv').read_bytes(),4)
+        with patch.object(archive,'COLLECTIONS',('spherex_dr1',)),patch.object(archive,'get_table',return_value=(table,limited)) as query:
+            first=self.client.get('/api/observations?ra=210.8&dec=54.3&detector=D3').json()
+            second=self.client.get('/api/observations?ra=210.8&dec=54.3&detector=D3').json()
+            self.assertEqual(query.call_count,1);self.assertEqual(first,second)
+            self.client.get('/api/observations?ra=210.8&dec=54.3&detector=D3&refresh=true')
+        self.assertEqual(query.call_count,2);self.assertTrue(first['sampling_limited']);self.assertTrue(first['total_lower_bound'])
+        self.assertEqual(first['query_limits'],{'spherex_dr1':4});self.assertIsInstance(first['queried_at'],float)
     def test_invalid_and_expired_key(self):
         self.assertEqual(self.client.get('/api/frame/bad/0.png').status_code,400);self.assertEqual(self.client.get('/api/frame/'+'a'*24+'/0.png').status_code,404)
         self.assertEqual(self.client.get('/api/photometry/bad').status_code,400)
@@ -193,14 +203,14 @@ class SearchRecoveryTests(unittest.TestCase):
         self.assertEqual(rows,[]);self.assertEqual(total,0);self.assertTrue(diagnostics['tap']['ok'])
     def test_partial_sia_and_tap_artifacts_are_deduplicated(self):
         fallback={'url':URL.replace('example','0'),'id':'0','band':'SPHEREx-D2','mjd':61000,'collection':'spherex_dr1'}
-        def table(ra,dec,radius,collection):
+        def table(ra,dec,radius,collection,**kwargs):
             if collection=='spherex_qr3':raise archive.ArchiveError('502')
             return [row()],False
         diagnostics={}
         with patch.object(archive,'COLLECTIONS',('spherex_dr1','spherex_qr3')),patch.object(archive,'get_table',side_effect=table),patch.object(archive,'tap_rows',return_value=([fallback],True)):
             rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4,diagnostics=diagnostics)
         self.assertEqual(total,1);self.assertEqual(diagnostics['method'],'SIA2 + TAP')
-        self.assertTrue(any('10,000' in w for w in warnings))
+        self.assertTrue(any('limited live sample' in w for w in warnings))
     def test_url_validation_rejects_traversal_queries_and_bad_ports(self):
         for url in ['https://[broken-address',URL+'?url=https://example.com',URL+'#fragment',URL.replace('/level2/','/level2/../'),URL.replace('example.fits','%2e%2e/secret.fits'),URL.replace('.edu/','.edu:bad/')]:
             with self.subTest(url=url):self.assertFalse(archive.safe_image_url(url))
@@ -253,9 +263,62 @@ class TAPParsingTests(unittest.TestCase):
         self.assertEqual(len(rows),1);self.assertEqual(rows[0]['url'],URL);self.assertIsNone(rows[0]['exptime']);self.assertFalse(overflow)
         self.assertIn('spherex.artifact',fetch.call_args.args[1]['QUERY'])
         self.assertIn("p.energy_bandpassname = 'SPHEREx-D2'",fetch.call_args.args[1]['QUERY'])
+        self.assertIn('SELECT TOP 16',fetch.call_args.args[1]['QUERY'])
+        self.assertIn("a.uri LIKE '%/spherex/dr1/level2/%'",fetch.call_args.args[1]['QUERY'])
+        self.assertEqual(fetch.call_args.args[1]['MAXREC'],16);self.assertEqual(fetch.call_args.args[1]['FORMAT'],'csv')
+    def test_tap_accepts_a_bounded_csv_result(self):
+        raw=f'uri,time_bounds_lower,energy_bandpassname\n{URL},61000.0,SPHEREx-D2\n'.encode()
+        with patch.object(archive,'COLLECTIONS',('spherex_dr1',)),patch.object(archive,'fetch_bytes',return_value=raw):
+            rows,limited=archive.tap_rows(1,2,'D2')
+        self.assertEqual(rows[0]['url'],URL);self.assertFalse(limited)
     def test_missing_required_columns_are_not_a_healthy_empty_result(self):
         from astropy.table import Table
         buffer=io.BytesIO();Table({'unexpected':[1]}).write(buffer,format='votable')
         with self.assertRaises(archive.ArchiveError):archive.read_table(buffer.getvalue(),('access_url',))
+
+
+class LiveSIARequestTests(unittest.TestCase):
+    def setUp(self):
+        self.csv=(Path(__file__).parent/'tests/fixtures/sia-m101-four.csv').read_bytes()
+    def test_user_csv_is_live_metadata_not_an_error_page(self):
+        table,limited=archive.read_sia_csv(self.csv,4)
+        self.assertEqual(len(table),4);self.assertTrue(limited)
+        self.assertEqual(set(table['energy_bandpassname']),{'SPHEREx-D3','SPHEREx-D6'})
+        self.assertTrue(all(archive.safe_image_url(url) for url in table['access_url']))
+        import json
+        self.assertEqual(json.loads(table['cloud_access'][0])['aws']['region'],'us-east-1')
+        self.assertEqual(set(table['upload_row_id']),{'1'})
+    def test_retry_smaller_live_query_after_proxy_error(self):
+        def remote(url,**options):
+            parsed=urlparse(url);params={k:v[0] for k,v in parse_qs(parsed.query).items()}
+            self.assertEqual(parsed.scheme+'://'+parsed.netloc+parsed.path,archive.SIA_URL)
+            self.assertEqual(params['RESPONSEFORMAT'],'CSV')
+            self.assertEqual(params['POS'],'CIRCLE 210.80227 54.34895 0.00001')
+            self.assertIn('BAND',params)
+            self.assertGreater(options['timeout'],21)
+            if int(params['MAXREC'])>4:raise archive.ArchiveError('Proxy Error')
+            return self.csv
+        with patch.object(archive,'fetch_bytes',side_effect=remote) as fetch:
+            table,limited=archive.get_table(210.80227,54.34895,.07,'spherex_dr1',detector='D3')
+        self.assertEqual(len(table),4);self.assertTrue(limited)
+        limits=[int(parse_qs(urlparse(c.args[0]).query)['MAXREC'][0]) for c in fetch.call_args_list]
+        self.assertGreater(limits[0],limits[-1]);self.assertEqual(table.meta['query_maxrec'],4)
+    def test_detector_is_forwarded_to_sia_before_row_limit(self):
+        with patch.object(archive,'get_table',return_value=([row()],False)) as query:
+            archive.search(12,3,.1,'D2',4)
+        self.assertTrue(all(call.kwargs['detector']=='D2' for call in query.call_args_list))
+    def test_empty_csv_with_schema_is_a_valid_empty_response(self):
+        header=self.csv.splitlines()[0]+b'\n'
+        table,limited=archive.read_sia_csv(header,4)
+        self.assertEqual(len(table),0);self.assertFalse(limited)
+    def test_bad_csv_html_and_incomplete_rows_are_errors(self):
+        for raw in [b'<html>Proxy error</html>',b'wrong,columns\n1,2\n',b'access_url,energy_bandpassname,t_min\nhttps://example.org/a.fits,SPHEREx-D2\n']:
+            with self.subTest(raw=raw),self.assertRaises(archive.ArchiveError):archive.read_sia_csv(raw,4)
+    def test_sample_limit_is_retained_in_diagnostics(self):
+        table,limited=archive.read_sia_csv(self.csv,4);diagnostics={}
+        with patch.object(archive,'get_table',return_value=(table,limited)):
+            rows,total,warnings,live,failed=archive.search(210.8,54.3,.05,'D3',24,diagnostics=diagnostics)
+        self.assertEqual(total,2);self.assertTrue(diagnostics['sampling_limited'])
+        self.assertTrue(diagnostics['complete_search']);self.assertTrue(warnings);self.assertFalse(failed)
 
 if __name__=='__main__':unittest.main()
