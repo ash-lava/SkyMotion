@@ -1,3 +1,72 @@
+sphere360 2.1.0 — validation, 15 November 2026 UTC
+
+BASE AND DEPLOYMENT
+Base 0d25208, merged interface-copy update 2.0.7. This release is proposed
+in a pull request; the owner merges and Render deploys it. The displayed
+name becomes sphere360. The existing repository/Render address is retained.
+
+IMPLEMENTED
+UTC date windows and immutable multi-search sequences; shared-scale A/B
+and blink; wavelength-aware signed difference and two-image mean; derived
+FITS/JSON and original-FITS downloads; live three-band infrared color with
+explicit channel dates/wavelengths and no gap filling; shared multi-window
+URLs and iframe code; updated source audit and beginner's guide.
+
+AUTOMATED CHECKS
+99 Python cases passed (existing tests plus date, comparison and color suites).
+36 React state cases, 15 atlas cases and 5 map lifecycle cases passed.
+Total: 155 automated checks. JavaScript syntax and git diff --check passed.
+Render's build command runs all four Python test modules.
+
+LIVE TARGET CHECKS
+Actual IRSA metadata and two science images rendered for each of Barnard's
+Star, Epsilon Indi B, WISE 0855, RW Aurigae and R Draconis. Some queries
+failed with 502 before later successful queries. R Draconis has a saturated/
+missing central region; WISE single D6 frames are noisy/faint. Loading a
+field does not prove source identification, motion or measured variability.
+Exact source products and coverage are in docs/validation-2.1.0.json.
+
+LIVE MULTI-EPOCH COMPARISON
+A November WISE 0855 D6 search returned 16 records. Combining it with an
+earlier actual sample produced 19 unique products over 192.88 days. The
+comparison tool selected actual 5 May / 14 November observations, 192.7413
+days apart, at 4.86093 / 4.87270 microns. About 52.12% of pixels pass both
+finite-coverage and local spectral-width checks. Signed difference, mean,
+PNG alpha, FITS data/mask and source JSON were checked. This verifies the
+calculation, not a claimed detection. Invalid-wavelength pairs stay blocked.
+
+LIVE COLOR
+Actual M101 D6/D2/D1 queries and FITS cutouts produced an in-app RGB image
+with 99.85% common finite coverage. The channels span 11.95 days; the
+mixed-date option was explicitly selected. Dates, wavelengths, individual
+stretches and exact URLs are preserved. D3 was intermittent, so D2 was
+selected for the supported green-channel alternative in this check.
+No mock image, generated sky, saved example or alternate survey filled a gap.
+
+BROWSER CHECKS
+17 recorded Chromium scenarios cover real images/rename, arithmetic gating,
+blink load readiness and view switching, a successful wavelength-checked
+multi-season difference/mean, FITS/JSON/color downloads, color date gating,
+320–1440px layouts, shared multi-window reconstruction, and iframe loading.
+There were no JavaScript runtime errors. A final clean backend restart
+re-downloaded the actual comparison pair and color channels and verified
+masks. One explicitly controlled, test-only delayed metadata response tested
+cancellation; it is not presented as successful live archive evidence.
+
+AVAILABILITY AND SCIENCE LIMITS
+IRSA 502 errors remain intermittent and are not treated as empty results.
+A real M101 October–December query succeeded with an empty table; WISE's
+November query succeeded with records and enforced the requested date range.
+Gaia's live optional overlay request returned 502. Full 102-channel spectra,
+calibrated light curves, PSF-matched subtraction, uncertainty propagation,
+weighted multi-image coadds and color movies are not implemented. Flagged
+finite pixels remain; flags include status bits and are not silently called
+contamination. Archive samples and wavelength matches can be incomplete.
+
+Details: README.md, docs/CHALLENGE_COVERAGE.md and docs/validation-2.1.0.json.
+
+PRECEDING RELEASE VALIDATION (HISTORICAL)
+
 SkyMotion 2.0.7 — interface copy, 15 November 2026 (UTC)
 
 Base: f139d4b, the merged 2.0.6 coverage update.

@@ -72,7 +72,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.7');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.1.0');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)

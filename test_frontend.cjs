@@ -3,10 +3,10 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const path=require('node:path'),root=__dirname;
 const pause=()=>new Promise(r=>setImmediate(r));
-function setup(search='') {
+function setup(search='',initialResponder=null) {
   let hook=0,states=[],refs=[],effects=[],pending=[],dirty=false,rootElement,tree;
   let handlers={},calls=[],timers=new Map(),nextTimer=0;
-  let responder=async url=>new Response(JSON.stringify({detail:'Fixture missing: '+url}),{status:500});
+  let responder=initialResponder||(async url=>new Response(JSON.stringify({detail:'Fixture missing: '+url}),{status:500}));
   const context={console,URL,URLSearchParams,AbortController,Blob,Response,Map,Date,Promise,DOMException,
     location:{search,href:'https://example.test/'+search,reload(){}},history:{replaceState(a,b,url){context.location.href='https://example.test/'+url;}},navigator:{clipboard:{async writeText(){}}},
     document:{getElementById(){return {};},activeElement:{focus(){}},createElement(){return {click(){}}}},
@@ -23,6 +23,8 @@ function setup(search='') {
   };
   context.ReactDOM={createRoot(){return {render(el){rootElement=el;}};}};
   vm.runInContext(fs.readFileSync(path.join(root,'htm.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(root,'color-view.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(root,'comparison-view.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),context);
   function render(){hook=0;dirty=false;tree=rootElement.type();const run=pending;pending=[];run.forEach(fn=>fn());return tree;}
   async function settle(){for(let i=0;i<10;i++){if(dirty||!tree)render();await pause();}if(dirty)render();}
@@ -30,7 +32,7 @@ function setup(search='') {
   function text(node){if(node==null||typeof node==='boolean')return '';if(Array.isArray(node))return node.map(text).join('');if(typeof node==='object')return text(node.props?.children);return String(node);}
   function find(predicate){const node=flatten(tree).find(predicate);assert.ok(node,'Element not found');return node;}
   const ui={settle,render,calls,context,timers,text:()=>text(tree),nodes:()=>flatten(tree),setResponder(fn){responder=fn;},
-    button(name){return find(n=>n.type==='button'&&(n.props['aria-label']===name||text(n)===name));},
+    button(name){return find(n=>n.type==='button'&&(n.props['aria-label']===name||text(n).replace(/\s+/g,' ').trim()===name));},
     field(name){return find(n=>(n.type==='input'||n.type==='select')&&n.props['aria-label']===name);},
     byType(type){return find(n=>n.type===type);},
     async click(name){ui.button(name).props.onClick();await settle();},
@@ -111,6 +113,58 @@ function normal(url){if(url.startsWith('/api/observations'))return response(sequ
  await test('Missing-data legend distinguishes coverage from flag quality',async()=>{
   const ui=setup('?mode=atlas');ui.setResponder(url=>url.startsWith('/api/frame-info/')?response({coverage:.7599555,flagged_fraction:1}):normal(url));
   await ui.click('Load SPHEREx exposures');assert.match(ui.text(),/76.0% valid pixels/);assert.match(ui.text(),/Hatching: no valid data/);ui.cleanup();
+ });
+ await test('UTC dates are sent upstream and included in shared URLs',async()=>{
+  const ui=setup('?mode=atlas',normal);await ui.change('Observation start date','2025-05-01');await ui.change('Observation end date','2025-05-31');await ui.click('Load SPHEREx exposures');
+  const params=new URL(ui.calls.find(u=>u.startsWith('/api/observations?')),'https://example.test').searchParams;
+  assert.equal(params.get('start'),'2025-05-01');assert.equal(params.get('end'),'2025-05-31');
+  await ui.click('Share view');assert.match(ui.context.location.href,/start=2025-05-01/);ui.cleanup();
+ });
+ await test('Reversed date range preserves loaded data and avoids an archive request',async()=>{
+  const ui=setup('?mode=atlas',normal);await ui.click('Load SPHEREx exposures');const count=ui.calls.length;
+  await ui.change('Observation start date','2025-11-02');await ui.change('Observation end date','2025-11-01');await ui.click('Load SPHEREx exposures');
+  assert.equal(ui.calls.length,count);assert.match(ui.text(),/Start date must be on or before/);assert.match(ui.text(),/3 of 3 exposures/);ui.cleanup();
+ });
+ await test('Adding a date window uses the current immutable search and adopts its new snapshot',async()=>{
+  const ui=setup('?mode=atlas',url=>url.startsWith('/api/observations?')&&url.includes('append=')?response(sequence('b'.repeat(24),4)):normal(url));
+  await ui.click('Load SPHEREx exposures');await ui.change('Observation start date','2025-11-01');await ui.click('Add these dates to sequence');
+  const appended=ui.calls.find(u=>u.includes('append='));assert.ok(appended.includes('append='+'a'.repeat(24)));
+  assert.match(ui.text(),/4 of 4 exposures/);assert.ok(ui.calls.some(u=>u.includes('/frame/'+'b'.repeat(24)+'/0.png')));ui.cleanup();
+ });
+ await test('Failed additional dates keep the existing sequence playable',async()=>{
+  const ui=setup('?mode=atlas',url=>url.includes('append=')?response({detail:'Archive retry needed'},503):normal(url));await ui.click('Load SPHEREx exposures');await ui.imageLoaded();
+  await ui.change('Observation start date','2025-11-01');await ui.click('Add these dates to sequence');
+  assert.match(ui.text(),/3 of 3 exposures/);assert.match(ui.text(),/Archive retry needed/);assert.equal(ui.button('Play observations').props.disabled,false);ui.cleanup();
+ });
+ await test('A failed additional search preserves an existing frame error and its retry',async()=>{
+  const ui=setup('?mode=atlas',url=>url.includes('append=')?response({detail:'Archive retry needed'},503):url.startsWith('/api/frame/')?response({detail:'Existing cutout failed'},502):normal(url));
+  await ui.click('Load SPHEREx exposures');assert.ok(ui.button('Retry frame'));
+  await ui.change('Observation start date','2025-11-01');await ui.click('Add these dates to sequence');
+  assert.match(ui.text(),/Existing cutout failed/);assert.ok(ui.button('Retry frame'));assert.equal(ui.button('Play observations').props.disabled,true);ui.cleanup();
+ });
+ await test('Shared multi-window sequences repeat bounded searches in order',async()=>{
+  const ranges=[{start:'2025-05-01',end:'2025-05-31'},{start:'2025-11-01',end:'2025-11-30'}];
+  const ui=setup('?ra=210.8&dec=54.3&mode=sequence&windows='+encodeURIComponent(JSON.stringify(ranges)),normal);await ui.settle();
+  const searches=ui.calls.filter(u=>u.startsWith('/api/observations?'));assert.equal(searches.length,2);
+  assert.match(searches[0],/start=2025-05-01/);assert.match(searches[1],/start=2025-11-01/);assert.match(searches[1],/append=/);ui.cleanup();
+ });
+ await test('Comparison receives source indices after filtering',async()=>{
+  const ui=setup('?mode=atlas',url=>url.startsWith('/api/frame-info/')?response({coverage:url.endsWith('/1')?.6:1}):normal(url));
+  await ui.click('Load SPHEREx exposures');await ui.change('Exposure coverage','good');await ui.click('Next exposure');await ui.click('Compare two exposures');
+  const modal=ui.nodes().find(n=>n.type?.name==='ComparisonDialog');assert.equal(modal.props.initialIndex,2);assert.equal(modal.props.data.observations.length,3);ui.cleanup();
+ });
+ await test('Color uses the selected field and dates without starting extra searches on opening',async()=>{
+  const ui=setup('?mode=atlas',normal);await ui.change('Observation start date','2025-05-01');await ui.click('Make infrared color');
+  const modal=ui.nodes().find(n=>n.type?.name==='ColorDialog');assert.equal(modal.props.target.ra,210.80227);assert.equal(modal.props.fov,6);assert.equal(modal.props.start,'2025-05-01');
+  assert.equal(ui.calls.length,0);await ui.change('SPHEREx detector','D3');assert.ok(!ui.nodes().some(n=>n.type?.name==='ColorDialog'));ui.cleanup();
+ });
+ await test('WISE 0855 preset starts with the longer-wavelength detector',async()=>{
+  const ui=setup('?mode=atlas');ui.nodes().find(n=>n.props.className?.startsWith('target-row')&&JSON.stringify(n.props.children).includes('WISE 0855')).props.onClick();await ui.settle();
+  assert.equal(ui.field('SPHEREx detector').props.value,'D6');assert.equal(ui.field('Cutout size').props.value,12);ui.cleanup();
+ });
+ await test('Embed code preserves the current coordinate URL and escapes HTML attributes',async()=>{
+  const ui=setup('?mode=atlas');let copied='';ui.context.navigator.clipboard.writeText=async value=>{copied=value;};await ui.click('About the data');await ui.click('Copy embed code');
+  assert.match(copied,/<iframe /);assert.match(copied,/title="sphere360 sky viewer"/);assert.match(copied,/&amp;dec=/);assert.match(copied,/height="760"/);ui.cleanup();
  });
  console.log(`${passed} frontend state tests passed (no browser rendering).`);
 })().catch(err=>{console.error(err);process.exitCode=1;});

@@ -1,5 +1,62 @@
-SKYMOTION: A BEGINNER'S GUIDE
-Applies to version 2.0.7
+sphere360: A BEGINNER'S GUIDE
+Applies to version 2.1.0
+
+WHAT CHANGED IN 2.1.0
+
+The interface is now named sphere360. The GitHub repository and Render
+service keep their original names, so existing links continue to work.
+
+The new comparison and color controls run in your browser. They ask the
+same Python server for real IRSA data, then display processed versions:
+
+- Observation dates adds a TIME constraint to the live SIA query (or a
+  time condition to the fallback TAP query). End dates include the whole
+  UTC day. The server verifies returned observation start times too.
+- Add these dates to sequence joins two genuine search results. It removes
+  duplicate product URLs and orders them by time. A new immutable search
+  key prevents an old image index from suddenly referring to another image.
+  Combined sequences retain at most 64 frames and 20 search windows.
+- Compare two exposures uses one contrast scale for A and B. Blinking
+  alternates them after both images load. The normal timeline still uses
+  independent contrast stretches, so it is less suitable for judging flux.
+- Difference is B minus A. Gold means B has a larger value; blue means A
+  does. These colors encode a signed number, not the object's physical color.
+  Mean is the average of the two images and can blur a moving source.
+- Difference and mean need the same detector, verified MJy/sr brightness
+  units and similar wavelengths. The spectral WCS supplies wavelength and
+  channel width at each sky pixel. Only common finite pixels within half
+  the narrower channel width are retained. All other pixels stay missing.
+- Optional median sky removal subtracts a constant from each image. It
+  reduces uniform background offsets; it cannot remove structured
+  zodiacal foreground. This is quick-look arithmetic without PSF matching,
+  error propagation or a statistical discovery test.
+- Make infrared color makes three live detector searches. It selects the
+  closest dates within the returned samples, but lets you choose another
+  exposure for each visible channel. The Python server aligns the actual
+  three science arrays, stretches their intensities and assigns RGB.
+  Only pixels measured in all three images get a visible color.
+- Infrared is invisible to our eyes. Assigned RGB colors help us see
+  differences between infrared measurements. They are not eye-visible
+  true colors, and independent stretches make them qualitative. Dates more
+  than a day apart require the mixed-date choice because movement or
+  variability can create colored features. Every channel's date, wavelength
+  and original IRSA product are shown. This is a static composite, not a
+  color movie. Nothing fills missing exposures or pixels.
+- Original FITS links open the archive product/cutout directly. Derived
+  difference/mean FITS downloads preserve numeric values, sky coordinates,
+  valid-pixel masks and source IDs. JSON downloads retain provenance.
+- Share view keeps the date searches; Copy embed code creates an iframe.
+  An iframe is a small window in another webpage that loads this app.
+
+The live checks loaded images for all five requested challenge fields.
+An image loading does not prove that a faint target is detected or that its
+motion can be measured. R Draconis has a saturated/missing core in inspected
+D2 images; WISE 0855 is faint and noisy in single D6 exposures. A useful
+comparison needs suitable dates, wavelengths and signal-to-noise.
+
+Gaia's optional live service failed during this check. Its failure does not
+block the independent IRSA images. Full 102-channel spectra, calibrated
+light curves and PSF-matched subtraction are still outside this viewer.
 
 You have built a website that runs in more than one place. Understanding
 which part is doing a job makes its error messages much less mysterious.
@@ -271,7 +328,7 @@ from an astronomy provider. The response details help distinguish the layers.
 
 CORS is a browser rule controlling which websites JavaScript may read from.
 A server answering a URL does not necessarily allow every other website to
-read it directly in a browser. SkyMotion requests images from its own Render
+read it directly in a browser. sphere360 requests images from its own Render
 origin; Python handles the external archive requests. The observed atlas
 404 was not evidence of a CORS problem.
 
@@ -302,7 +359,7 @@ astropy-healpix; the existing build installs it automatically. You do not
 need to install it manually in your browser or create another Render service.
 
 After a successful build, Render starts Uvicorn with server:app. Then the
-new version serves requests. In this update, /api/health should show 2.0.7.
+new version serves requests. In this update, /api/health should show 2.1.0.
 Confirm that version and then test an actual atlas image and SPHEREx frame.
 
 10. WHERE THINGS LIVE IN THE PROJECT
@@ -310,6 +367,10 @@ Confirm that version and then test an actual atlas image and SPHEREx frame.
 index.html:         The initial page and links to browser assets.
 style.css:          Colors, fonts, spacing and responsive layout.
 app.js:             React interface, search forms, playback and API requests.
+comparison-view.js: Comparison dialog and wavelength-match search.
+color-view.js:      Live three-channel color dialog.
+comparison.py:      Numeric comparison, shared contrast and masks.
+infrared_color.py:  Three real science arrays rendered as assigned RGB.
 sky-atlas.js:       Map dragging, zooming, grid and image display.
 server.py:          FastAPI app, SPHEREx routes and FITS image processing.
 archive_client.py:  IRSA SIA/TAP searches, parsing, retries and download rules.

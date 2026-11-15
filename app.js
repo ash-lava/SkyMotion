@@ -1,4 +1,4 @@
-/* SkyMotion / React 18 + htm. No Node build required. */
+/* sphere360 / React 18 + htm. No Node build required. */
 const {useState, useEffect, useRef} = React;
 const html = htm.bind(React.createElement);
 const ICONS = {
@@ -19,13 +19,13 @@ const ICONS = {
 function Icon({name, size=18}) {
   return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d=${ICONS[name] || ICONS.star}/></svg>`;
 }
-const M101 = {name:'Pinwheel Galaxy',ra:210.80227,dec:54.34895,type:'Spiral galaxy',tag:'M101',fov:6};
+const M101 = {name:'Pinwheel Galaxy',ra:210.80227,dec:54.34895,type:'Spiral galaxy',tag:'M101',fov:6,band:'D2'};
 const TARGETS = [M101,
-  {name: 'Barnard’s Star', ra:269.4521, dec:4.6934, type:'High proper motion', tag:'01', fov:12},
-  {name: 'Epsilon Indi B', ra:331.0441466, dec:-56.7828442, type:'Brown dwarf pair', tag:'02', fov:6},
-  {name: 'WISE 0855', ra:133.7951292, dec:-7.2451472, type:'Cold brown dwarf', tag:'03', fov:12},
-  {name: 'RW Aurigae', ra:76.9565260, dec:30.4014382, type:'Variable star', tag:'04'},
-  {name: 'R Draconis', ra:248.1676075, dec:66.7549842, type:'Variable star', tag:'05'}
+  {name: 'Barnard’s Star', ra:269.4521, dec:4.6934, type:'High proper motion', tag:'01', fov:12,band:'D2'},
+  {name: 'Epsilon Indi B', ra:331.0441466, dec:-56.7828442, type:'Brown dwarf pair', tag:'02', fov:6,band:'D2'},
+  {name: 'WISE 0855', ra:133.7951292, dec:-7.2451472, type:'Cold brown dwarf', tag:'03', fov:12, band:'D6'},
+  {name: 'RW Aurigae', ra:76.9565260, dec:30.4014382, type:'Variable star', tag:'04',fov:3,band:'D2'},
+  {name: 'R Draconis', ra:248.1676075, dec:66.7549842, type:'Variable star', tag:'05',fov:3,band:'D2'}
 ];
 const SURVEYS = {
   dss: {id:'P/DSS2/color', label:'DSS · Optical color', short:'DSS2 color', credit:'DSS / STScI · IRSA'},
@@ -51,6 +51,12 @@ async function api(url, signal) {
   if (!response.ok) throw new Error(errorMessage(payload, `Request failed (${response.status}). Please retry.`));
   return payload;
 }
+function searchWindows(raw){
+  try{
+    const values=JSON.parse(raw),valid=v=>v==null||v===''||typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v);
+    return Array.isArray(values)&&values.length>0&&values.length<=20&&values.every(v=>v&&valid(v.start)&&valid(v.end)&&!(v.start&&v.end&&v.start>v.end))?values.map(v=>({start:v.start||null,end:v.end||null})):[];
+  }catch{return [];}
+}
 function initialState() {
   const p = new URLSearchParams(location.search), ra = Number(p.get('ra')), dec = Number(p.get('dec'));
   const valid = p.has('ra') && p.has('dec') && Number.isFinite(ra) && Number.isFinite(dec) && ra>=0 && ra<360 && dec>=-90 && dec<=90;
@@ -61,6 +67,7 @@ function initialState() {
     fov:[1,2,3,6,12].includes(+p.get('fov')) ? +p.get('fov') : (valid ? 3 : 6),
     band:DETECTORS[p.get('band')] ? p.get('band') : 'D2',
     survey:SURVEYS[p.get('layer')] ? p.get('layer') : 'dss',
+    start:/^\d{4}-\d{2}-\d{2}$/.test(p.get('start'))?p.get('start'):'',end:/^\d{4}-\d{2}-\d{2}$/.test(p.get('end'))?p.get('end'):'',windows:searchWindows(p.get('windows')),
     auto:valid ? p.get('mode')==='sequence' : !p.has('ra')&&!p.has('dec')&&p.get('mode')!=='atlas'&&!p.has('atlas')};
 }
 function SkyMap({mapRef,target,view={ra:target.ra,dec:target.dec,fov:6},survey,grid=false,onCenter,onState,onError}) {
@@ -91,15 +98,16 @@ function SkyMap({mapRef,target,view={ra:target.ra,dec:target.dec,fov:6},survey,g
   useEffect(()=>{if(mapRef.current)mapRef.current.setBaseImageLayer(SURVEYS[survey].id);},[survey]);
   return html`<div id="sky-map" role="region" aria-label="Interactive sky map. Drag to pan and scroll to zoom."/>`;
 }
-function Modal({title,onClose,children}) {
+function Modal({title,onClose,children,wide=false}) {
   const ref=useRef();
   useEffect(()=>{const before=document.activeElement;ref.current.showModal();return()=>{ref.current?.close();before?.focus();};},[]);
-  return html`<dialog ref=${ref} className="modal" onCancel=${onClose} onClick=${e=>{if(e.target===ref.current)onClose();}}>
+  return html`<dialog ref=${ref} className=${`modal ${wide?'wide-modal':''}`} onCancel=${onClose} onClick=${e=>{if(e.target===ref.current)onClose();}}>
     <div className="modal-head"><h2>${title}</h2><button className="icon-button" aria-label="Close dialog" onClick=${onClose}><${Icon} name="cross"/></button></div>${children}
   </dialog>`;
 }
 function App() {
   const [initial]=useState(initialState);
+  const [start,setStart]=useState(initial.start),[end,setEnd]=useState(initial.end),[compareOpen,setCompareOpen]=useState(false),[colorOpen,setColorOpen]=useState(false);
   const [target,setTarget]=useState(initial.target),[query,setQuery]=useState(''),[fov,setFov]=useState(initial.fov),[band,setBand]=useState(initial.band);
   const [raInput,setRaInput]=useState(initial.target.ra.toFixed(6)),[decInput,setDecInput]=useState(initial.target.dec.toFixed(6));
   const [center,setCenter]=useState(initial.view),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading'),[mapError,setMapError]=useState('');
@@ -123,15 +131,17 @@ function App() {
   function clearSequence() {
     resetCoverage();
     searchRef.current?.abort(); photoRef.current?.abort();
-    setBusy(false);setPlaying(false);setData(null);setFrame(null);setInfo(null);setStars(null);setPhot(null);setPhotOpen(false);setNotesOpen(false);setMeasuring(false);setStatus(null);setFrameError('');
+    setBusy(false);setPlaying(false);setData(null);setFrame(null);setInfo(null);setStars(null);setPhot(null);setPhotOpen(false);setNotesOpen(false);setCompareOpen(false);setColorOpen(false);setMeasuring(false);setStatus(null);setFrameError('');
     blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();
   }
   function choose(t) {
     resolveRef.current?.abort();setResolving(false);clearSequence();setTarget(t);setCenter(v=>({...v,ra:t.ra,dec:t.dec}));
-    setRaInput(t.ra.toFixed(6));setDecInput(t.dec.toFixed(6));if(t.fov)setFov(t.fov);setQuery('');setPanel(false);
+    setRaInput(t.ra.toFixed(6));setDecInput(t.dec.toFixed(6));if(t.fov)setFov(t.fov);if(t.band)setBand(t.band);setQuery('');setPanel(false);
   }
-  function updateURL(t=target, display=mode) {
+  function updateURL(t=target, display=mode, windows=data?.search_windows) {
     const p=new URLSearchParams({ra:t.ra,dec:t.dec,fov,band,layer:survey,mode:display,atlas_ra:center.ra,atlas_dec:center.dec,atlas_fov:center.fov});
+    if(start)p.set('start',start);if(end)p.set('end',end);
+    if(windows?.length>1)p.set('windows',JSON.stringify(windows.map(w=>w.date_range||w)));
     history.replaceState(null,'',`?${p}`);
     return location.href;
   }
@@ -175,22 +185,32 @@ function App() {
     setCoverageMode('good');setIndex(Math.max(0,included.indexOf(sourceIndex)));
     setCoverageScan({running:false,checked:allObs.length,total:allObs.length,failed});
   }
-  async function loadExposures(refresh=false) {
+  async function loadExposures(refresh=false,append=false,windows=null) {
+    if(start&&end&&start>end){setStatus({error:true,text:'Start date must be on or before end date (UTC).'});setPanel(true);return;}
     resetCoverage();
     searchRef.current?.abort();const controller=new AbortController();searchRef.current=controller;
-    photoRef.current?.abort();setPhotOpen(false);setMeasuring(false);setPlaying(false);setBusy(true);setPanel(false);setStatus(null);setIndex(0);setData(null);setFrame(null);setInfo(null);setPhot(null);setFrameError('');setMode('sequence');
-    blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();
-    updateURL(target,'sequence');
+    photoRef.current?.abort();setPhotOpen(false);setCompareOpen(false);setColorOpen(false);setMeasuring(false);setPlaying(false);setBusy(true);setPanel(false);setStatus(null);setPhot(null);setMode('sequence');
+    if(!append){setIndex(0);setData(null);setFrame(null);setInfo(null);setFrameError('');blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();}
+    updateURL(target,'sequence',windows);
     try {
-      const d=await api('/api/observations?'+new URLSearchParams({ra:target.ra,dec:target.dec,fov,detector:band,limit:24,refresh}),controller.signal);
+      let d,previous=append?data?.key:null;
+      for(const range of windows||[{start,end}]){
+        const params=new URLSearchParams({ra:target.ra,dec:target.dec,fov,detector:band,limit:24,refresh});
+        if(range.start)params.set('start',range.start);if(range.end)params.set('end',range.end);if(previous)params.set('append',previous);
+        d=await api('/api/observations?'+params,controller.signal);
+        if(controller.signal.aborted)return;
+        previous=d.key;
+      }
       if(controller.signal.aborted)return;
-      setData(d);
+      if(append){blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();}
+      setIndex(0);setFrame(null);setInfo(null);setData(d);
+      updateURL(target,'sequence',d.search_windows);
       if(!d.observations.length)setStatus({text:'No matching exposures were returned by the available search. Try another detector or sky patch.',empty:true,details:d.warnings});
       else if(d.warnings.length)setStatus({text:d.sampling_limited&&!d.search_method?.includes('TAP')?'Limited sample from IRSA. More observations may be available.':d.search_method?.includes('TAP')?'An alternate IRSA search supplied these images. Some archive results may be missing.':'Some archive collections are unavailable. This sequence may be incomplete.',warning:true,details:d.warnings});
     } catch(err) {if(err.name!=='AbortError')setStatus({error:true,text:err.message});}
     finally {if(searchRef.current===controller)setBusy(false);}
   }
-  useEffect(()=>{if(initial.auto)loadExposures();return()=>{coverageRef.current?.abort();searchRef.current?.abort();resolveRef.current?.abort();photoRef.current?.abort();blobs.current.forEach(url=>URL.revokeObjectURL(url));};},[]);
+  useEffect(()=>{if(initial.auto)loadExposures(false,false,initial.windows.length?initial.windows:null);return()=>{coverageRef.current?.abort();searchRef.current?.abort();resolveRef.current?.abort();photoRef.current?.abort();blobs.current.forEach(url=>URL.revokeObjectURL(url));};},[]);
   useEffect(()=>{
     if(!data || !obs.length)return;
     const controller=new AbortController(), identity=`${data.key}/${sourceIndex}`;
@@ -225,17 +245,20 @@ function App() {
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3200);return()=>clearTimeout(timer);},[toast]);
   useEffect(()=>{
     function key(e) {
-      if(mode!=='sequence'||obs.length<1||!!coverageScan?.running||about||photOpen||notesOpen||/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))return;
+      if(mode!=='sequence'||obs.length<1||!!coverageScan?.running||about||photOpen||notesOpen||compareOpen||colorOpen||/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))return;
       if(e.code==='Space'){e.preventDefault();if(obs.length>1)setPlaying(v=>!v);}
       if(e.code==='ArrowRight'){e.preventDefault();setPlaying(false);setIndex(i=>(i+1)%obs.length);}
       if(e.code==='ArrowLeft'){e.preventDefault();setPlaying(false);setIndex(i=>(i+obs.length-1)%obs.length);}
     }
     window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
-  },[mode,obs.length,about,photOpen,notesOpen,coverageScan?.running]);
+  },[mode,obs.length,about,photOpen,notesOpen,compareOpen,colorOpen,coverageScan?.running]);
   function move(direction){setPlaying(false);setIndex(i=>(i+direction+obs.length)%obs.length);}
   function zoom(factor){if(mapRef.current)mapRef.current.setFoV(Math.min(360,Math.max(.01,mapRef.current.getFov()[0]*factor)));}
   function toggleGrid(){setGrid(v=>!v);}
   async function share(){const url=updateURL();try{await navigator.clipboard.writeText(url);setToast('Link copied.');}catch{setToast('Copy the link from your address bar.');}}
+  async function embed(){const url=updateURL();const code=`<iframe src="${url.replaceAll('&','&amp;').replaceAll('"','&quot;')}" title="sphere360 sky viewer" width="100%" height="760" loading="lazy" allow="clipboard-write"></iframe>`;try{await navigator.clipboard.writeText(code);setToast('Embed code copied.');}catch{setToast('Use the shared view URL as your iframe source.');}}
+  function color(){setPlaying(false);setNotesOpen(false);setColorOpen(true);}
+  function compare(){setPlaying(false);setNotesOpen(false);setCompareOpen(true);}
   async function measure(){
     setPhotOpen(true);if(phot||measuring)return;
     photoRef.current?.abort();const controller=new AbortController();photoRef.current=controller;setMeasuring(true);
@@ -243,14 +266,14 @@ function App() {
     catch(e){if(e.name!=='AbortError')setPhot({error:e.message});}finally{if(photoRef.current===controller)setMeasuring(false);}
   }
   function downloadMetadata(){
-    const rows=allObs.map(({id,date,band,collection,em_min,em_max,exptime},i)=>({id,date,band,collection,em_min,em_max,exptime,source_index:i,coverage:coverageInfo[i]?.coverage??null,displayed:visibleIndices.includes(i)}));
-    const blob=new Blob([JSON.stringify({target,fov_arcmin:fov,search_method:data.search_method||'SIA2',queried_at:data.queried_at,sampling_limited:!!data.sampling_limited,total_lower_bound:!!data.total_lower_bound,coverage_filter:coverageMode==='good'?{minimum_valid_fraction:MIN_COVERAGE,unverified_excluded:coverageScan?.failed||0}:null,displayed_source_indices:visibleIndices,missing_pixels:'Transparent pixels have no finite science data; display hatching is not astronomical signal.',observations:rows},null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='skymotion-observations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
+    const rows=allObs.map(({id,date,band,collection,em_min,em_max,exptime,archive_url},i)=>({id,date,band,collection,em_min,em_max,exptime,archive_url,source_index:i,coverage:coverageInfo[i]?.coverage??null,wavelength_um:coverageInfo[i]?.wavelength_um??null,bandwidth_um:coverageInfo[i]?.bandwidth_um??null,flagged_fraction:coverageInfo[i]?.flagged_fraction??null,processing_version:coverageInfo[i]?.version??null,original_cutout:new URL(`/api/cutout/${data.key}/${i}`,location.href).href,displayed:visibleIndices.includes(i)}));
+    const blob=new Blob([JSON.stringify({target,fov_arcmin:fov,search_method:data.search_method||'SIA2',queried_at:data.queried_at,date_range:data.date_range,search_windows:data.search_windows,time_span_days:data.time_span_days,sampling_limited:!!data.sampling_limited,total_lower_bound:!!data.total_lower_bound,coverage_filter:coverageMode==='good'?{minimum_valid_fraction:MIN_COVERAGE,unverified_excluded:coverageScan?.failed||0}:null,displayed_source_indices:visibleIndices,missing_pixels:'Transparent pixels have no finite science data; display hatching is not astronomical signal.',observations:rows},null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='sphere360-observations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
   }
 
   return html`<div className=${`app ${mode==='sequence'?'sequence-mode':''} ${allObs.length?'has-observations':''}`}>
     <header className="topbar">
-      <a className="brand" href="/" aria-label="SkyMotion home"><span className="brand-mark"><${Icon} name="star" size=${25}/></span><span>SkyMotion<span className="brand-period">.</span></span></a>
+      <a className="brand" href="/" aria-label="sphere360 home"><span className="brand-mark"><${Icon} name="star" size=${25}/></span><span>sphere360<span className="brand-period">.</span></span></a>
       <div className="topbar-right"><span className="archive-badge"><span className=${`status-dot ${status?.error?'warning':''}`}></span>SPHEREx <span className="muted">/ ${releases.length ? releases.join(' + ') : 'IRSA'}</span></span>
       <button className="text-button about-button" onClick=${()=>setAbout(true)}><${Icon} name="info" size=${16}/> About the data</button>
       <button className="share-button" onClick=${share}><${Icon} name="share" size=${15}/> Share view</button>
@@ -269,8 +292,10 @@ function App() {
           ${TARGETS.map(t=>html`<button key=${t.name} className=${`target-row ${target.name===t.name?'active':''}`} onClick=${()=>choose(t)}><span className="target-number">${t.tag}</span><span><strong>${t.name}</strong><small>${t.type}</small></span><${Icon} name="arrow" size=${15}/></button>`)}
         </div></details>
         <div className="observation-settings"><div className="input-pair"><label>SPHEREx cutout<select aria-label="Cutout size" value=${fov} onChange=${e=>{clearSequence();setFov(+e.target.value);}}>${[1,2,3,6,12].map(v=>html`<option key=${v} value=${v}>${v} arcmin</option>`)}</select></label><label>SPHEREx detector<select aria-label="SPHEREx detector" value=${band} onChange=${e=>{clearSequence();setBand(e.target.value);}}>${Object.keys(DETECTORS).map(b=>html`<option key=${b} value=${b}>${b} · ${DETECTORS[b]}</option>`)}</select></label></div>
+        <details className="date-settings"><summary>Observation dates · UTC</summary><div className="input-pair"><label>From<input type="date" aria-label="Observation start date" value=${start} onChange=${e=>setStart(e.target.value)}/></label><label>Through<input type="date" aria-label="Observation end date" value=${end} onChange=${e=>setEnd(e.target.value)}/></label></div><p className="science-note">Blank dates search all available times. Small archive responses can miss other seasons. Set a different range and add it to the sequence.</p><button className="text-button" onClick=${()=>{setStart('');setEnd('');}}>Clear dates</button></details>
+        ${data&&allObs.length?html`<button className="subtle-button add-dates" disabled=${busy||!(start||end)} onClick=${()=>loadExposures(false,true)}>Add these dates to sequence</button>`:null}
         <button className="primary-button" disabled=${busy||resolving} onClick=${()=>loadExposures()}><span>${busy?'Finding exposures…':'Load SPHEREx exposures'}</span>${busy?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button>
-        <p className="quiet-note">Data: NASA/IPAC IRSA.</p></div>
+        <button className="text-button color-open" onClick=${color}>Make infrared color <${Icon} name="arrow" size=${13}/></button><p className="quiet-note">Data: NASA/IPAC IRSA.</p></div>
       </aside>
       <div className="map-top-controls"><div className="view-switch" role="group" aria-label="Viewer mode"><button className=${mode==='atlas'?'active':''} onClick=${()=>{setMode('atlas');setPlaying(false);}}>Sky atlas</button><button className=${mode==='sequence'?'active':''} onClick=${()=>setMode('sequence')}>SPHEREx sequence ${obs.length?html`<span>${obs.length}</span>`:null}</button></div>
       <label className="survey-select"><${Icon} name="layers" size=${16}/><span className="sr-only">Sky survey</span><select aria-label="Sky survey" value=${survey} onChange=${e=>setSurvey(e.target.value)}>${Object.entries(SURVEYS).map(([k,s])=>html`<option key=${k} value=${k}>${s.label}</option>`)}</select></label></div>
@@ -287,13 +312,13 @@ function App() {
             ${frameBusy&&!frameError?html`<div className="frame-loading"><span className="spinner"></span><span>Loading exposure ${index+1}…</span></div>`:null}
             ${frameError?html`<div className="frame-error" role="alert"><${Icon} name="info" size=${24}/><p>${frameError}</p><button className="subtle-button" onClick=${()=>{blobs.current.delete(`${data.key}/${sourceIndex}`);setRetry(v=>v+1);}}>Retry frame</button><button className="text-button" onClick=${()=>move(1)} disabled=${obs.length<2}>Skip to next exposure</button></div>`:null}
           </div>
-          <div className="frame-caption"><span>${observed(o.date)} <span className="muted">UTC</span></span><span>North up · same sky grid</span></div><div className="coverage-legend" role="status"><span className="missing-swatch" aria-hidden="true"></span><span>${info?.coverage!=null?`${coveragePercent(info.coverage)} valid pixels · `:''}Hatching: no valid data</span></div><button className="mobile-notes text-button" onClick=${()=>{setPlaying(false);setNotesOpen(true);}}>Exposure notes & Gaia <${Icon} name="info" size=${13}/></button>
+          <div className="frame-caption"><span>${observed(o.date)} <span className="muted">UTC</span></span><span>North up · same sky grid</span></div><div className="coverage-legend" role="status"><span className="missing-swatch" aria-hidden="true"></span><span>${info?.coverage!=null?`${coveragePercent(info.coverage)} valid pixels · `:''}Hatching: no valid data</span></div><div className="frame-actions"><button className="comparison-open subtle-button" disabled=${allObs.length<2} onClick=${compare}>Compare two exposures</button><button className="comparison-open subtle-button" onClick=${color}>Infrared color</button></div><button className="mobile-notes text-button" onClick=${()=>{setPlaying(false);setNotesOpen(true);}}>Exposure notes & Gaia <${Icon} name="info" size=${13}/></button>
         </div>`:coverageMode==='good'&&allObs.length?html`<div className="sequence-placeholder"><${Icon} name="layers" size=${30}/><h2>No frames meet this coverage filter.</h2><p>No verified exposure has at least 95% valid pixels in this cutout.${coverageScan?.failed?` ${coverageScan.failed} exposures could not be checked.`:''}</p><button className="primary-button" onClick=${()=>changeCoverage('all')}>Show all frames</button><p>A smaller SPHEREx cutout may have better coverage.</p></div>`:html`<div className="sequence-placeholder"><${Icon} name="layers" size=${30}/><h2>${status?.empty?'No observations found.':status?.error?'Couldn’t load observations.':'No observations loaded'}</h2><p>${status?.text||'Load observations for the selected coordinates, then use Play or the arrow keys.'}</p>${archiveDetails(status?.details)}<button className="primary-button" onClick=${()=>loadExposures(true)}>${status?.error?'Retry archive':'Load SPHEREx exposures'}<${Icon} name="arrow" size=${17}/></button><button className="text-button" onClick=${()=>setMode('atlas')}>Return to sky atlas</button></div>`}
-        ${obs.length?html`<aside className="exposure-info panel"><span className="eyebrow">EXPOSURE NOTES</span><dl><dt>Observed · UTC</dt><dd>${observed(o.date)}</dd><dt>Detector</dt><dd>${band} <span>${DETECTORS[band]}</span></dd><dt>Wavelength at center</dt><dd>${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'Not available'}</dd><dt>Release</dt><dd>${o.collection.replace('spherex_','').toUpperCase()}</dd><dt>Flagged pixels</dt><dd>${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'Not available'}</dd><dt>Patch covered</dt><dd>${info?coveragePercent(info.coverage):'…'}</dd></dl>
+        ${obs.length?html`<aside className="exposure-info panel"><span className="eyebrow">EXPOSURE NOTES</span><dl><dt>Observed · UTC</dt><dd>${observed(o.date)}</dd><dt>Detector</dt><dd>${band} <span>${DETECTORS[band]}</span></dd><dt>Wavelength at center</dt><dd>${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'Not available'}</dd><dt>Channel width</dt><dd>${info?.bandwidth_um?`${info.bandwidth_um.toFixed(4)} µm`:'Not available'}</dd><dt>Release</dt><dd>${o.collection.replace('spherex_','').toUpperCase()}</dd><dt>Nonzero flags</dt><dd>${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'Not available'}</dd><dt>Patch covered</dt><dd>${info?coveragePercent(info.coverage):'…'}</dd></dl>
           <label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>
           ${gaiaError?html`<p className="inline-warning">${gaiaError}</p>`:null}
           <p className="science-note">Brightness and wavelength can vary between exposures. The same detector is not the same spectral channel.</p>
-          <button className="text-button" onClick=${measure}>Brightness proxy <${Icon} name="arrow" size=${14}/></button><button className="text-button" onClick=${downloadMetadata}>Save metadata <${Icon} name="download" size=${14}/></button>
+          <a className="text-button original-link" href=${`/api/cutout/${data.key}/${sourceIndex}`} target="_blank" rel="noreferrer">Original FITS ↗</a><button className="text-button" onClick=${measure}>Brightness proxy <${Icon} name="arrow" size=${14}/></button><button className="text-button" onClick=${downloadMetadata}>Save metadata <${Icon} name="download" size=${14}/></button>
         </aside>`:null}
       </section>`:null}
       ${status && (mode==='atlas'||obs.length>0)?html`<div className=${`notice ${status.error?'notice-error':status.warning?'notice-warning':''}`} role="status"><${Icon} name="info" size=${17}/><div className="notice-copy"><span>${status.text}</span>${archiveDetails(status.details)}</div><button aria-label="Dismiss message" onClick=${()=>setStatus(null)}><${Icon} name="cross" size=${15}/></button></div>`:null}
@@ -303,13 +328,15 @@ function App() {
         <div className="timeline-main"><div className="play-controls"><button className="icon-button" aria-label="Previous exposure" disabled=${!obs.length||!!coverageScan?.running} onClick=${()=>{setMode('sequence');move(-1);}}><${Icon} name="back" size=${17}/></button><button className="play-button" aria-label=${playing?'Pause playback':'Play observations'} disabled=${obs.length<2||!!frameError||!!coverageScan?.running} onClick=${()=>{setMode('sequence');setPlaying(v=>!v);}}><${Icon} name=${playing?'pause':'play'} size=${20}/></button><button className="icon-button" aria-label="Next exposure" disabled=${!obs.length||!!coverageScan?.running} onClick=${()=>{setMode('sequence');move(1);}}><${Icon} name="next" size=${17}/></button></div>
         <div className="timeline-track">${obs.length?html`<input className="exposure-slider" aria-label="Exposure number" type="range" min="0" max=${Math.max(0,obs.length-1)} value=${index} disabled=${!!coverageScan?.running} onChange=${e=>{setPlaying(false);setMode('sequence');setIndex(+e.target.value);}}/><div className="timeline-dates"><span>${date(obs[0].date)}</span><span>${obs.length===1?'One available exposure':`${index+1} / ${obs.length}`}</span><span>${date(obs[obs.length-1].date)}</span></div>`:html`<div className="empty-track"><span></span><p>${busy?'Searching the archive…':'Choose a target and load observations.'}</p></div>`}</div>
         <label className="pace"><span>Playback</span><select aria-label="Playback speed" value=${speed} onChange=${e=>setSpeed(+e.target.value)}><option value="1800">Slow</option><option value="1000">Steady</option><option value="450">Fast</option></select></label></div>
-        <div className="timeline-foot"><span>${obs.length?'Aligned frames · independent intensity stretch · use ← → to step':'Drag to explore the map. Scroll to zoom. The atlas is a reference, not a time series.'}</span>${obs.length?html`<button className="text-button" onClick=${()=>loadExposures(true)} disabled=${busy}><${Icon} name="refresh" size=${12}/> Refresh archive</button>`:null}</div>
+        <div className="timeline-foot"><span>${obs.length?`${data?.time_span_days!=null?`${data.time_span_days.toFixed(2)} days covered · `:''}independent stretch · ← → to step`:'Drag to explore the map. Scroll to zoom. The atlas is a reference, not a time series.'}</span>${obs.length?html`<button className="text-button" onClick=${()=>loadExposures(true)} disabled=${busy}><${Icon} name="refresh" size=${12}/> Reload these dates</button>`:null}</div>
       </section>
       <footer className="map-credit"><span>${mode==='atlas'?SURVEYS[survey].credit:'SPHEREx · NASA / JPL / Caltech · IRSA'}</span><button onClick=${()=>setAbout(true)}>Data & credits</button></footer>
       ${toast?html`<div className="toast" role="status">${toast}</div>`:null}
     </main>
-    ${about?html`<${Modal} title="About SkyMotion" onClose=${()=>setAbout(false)}><p>SkyMotion displays sky survey images and SPHEREx observations from IRSA.</p><div className="about-section"><h3>Sky atlas</h3><p>DSS, 2MASS, and WISE survey images are served from NASA/IPAC IRSA’s public survey mirror and displayed in the built-in atlas. Their color composites combine telescope bands; they are reference maps, not SPHEREx frames or a view of how the sky looks to your eyes.</p></div><div className="about-section"><h3>SPHEREx observations</h3><p>Each grayscale frame comes from an IRSA FITS science image. Exposures are resampled onto one north-up, east-left coordinate grid. Playback waits for the current frame to load.</p><p>Frames use independent intensity stretches. Wavelength, detector noise, flagged pixels, and PSF changes can imitate variability. Compare metadata before interpreting changes. Hatched areas have no valid science data. The coverage filter keeps frames with at least 95% finite pixels; it does not reject quality flags. Flag percentages count any nonzero flag; these pixels are not automatically rejected.</p></div><div className="about-section"><h3>Comparing images</h3><p>Start with the five challenge targets, choose a detector, and load exposures. Use the arrow keys to step through. Gaia rings use approximate linear proper motion; missing rings do not establish a new discovery. Suggested target coordinates are finding positions, not date-propagated ephemerides. Fast-moving targets open a wider cutout to include their more recent positions.</p></div><p className="credit-line">Independent NASA Space Apps project. Not an official NASA product.<br/>Data: NASA / JPL / Caltech / IPAC, STScI, UMass, UCLA, ESA Gaia. Reference surveys: CDS HiPS via IRSA. Name lookup: CDS Sesame.</p><div className="about-links"><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noreferrer">SPHEREx at IRSA ↗</a><a href="https://irsa.ipac.caltech.edu/data/hips/list" target="_blank" rel="noreferrer">IRSA survey images ↗</a></div></${Modal}>`:null}
-    ${notesOpen&&o?html`<${Modal} title="Exposure notes" onClose=${()=>setNotesOpen(false)}><p>${observed(o.date)} UTC · ${band} · ${o.collection.replace('spherex_','').toUpperCase()}</p><p>Valid pixels in patch: ${info?.coverage!=null?coveragePercent(info.coverage):'not available'}<br/>Hatching marks missing data.</p><p>Center wavelength: ${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'not available'}<br/>Flagged pixels: ${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'not available'}</p><label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>${gaiaError?html`<p>${gaiaError}</p>`:null}<p className="science-note">Each frame has its own intensity stretch. Wavelength, PSF, and flagged pixels can imitate changes. Compare metadata before interpreting variability.</p><button className="subtle-button" onClick=${()=>{setNotesOpen(false);measure();}}>Measure brightness proxy</button><button className="text-button" style=${{marginLeft:14}} onClick=${downloadMetadata}>Save metadata</button></${Modal}>`:null}
+    ${about?html`<${Modal} title="About sphere360" onClose=${()=>setAbout(false)}><p>sphere360 displays sky survey images and SPHEREx observations from IRSA.</p><div className="about-section"><h3>Sky atlas</h3><p>DSS, 2MASS, and WISE survey images are served from NASA/IPAC IRSA’s public survey mirror and displayed in the built-in atlas. Their color composites combine telescope bands; they are reference maps, not SPHEREx frames or a view of how the sky looks to your eyes.</p></div><div className="about-section"><h3>SPHEREx observations</h3><p>Each grayscale frame comes from an IRSA FITS science image. Exposures are resampled onto one north-up, east-left coordinate grid. Playback waits for the current frame to load.</p><p>Frames use independent intensity stretches. Wavelength, detector noise, flagged pixels, and PSF changes can imitate variability. Compare metadata before interpreting changes. Hatched areas have no valid science data. The coverage filter keeps frames with at least 95% finite pixels; it does not reject quality flags. Flag percentages count any nonzero flag, including status bits; these pixels are not automatically rejected. Search listings can be cached for six hours; Reload these dates requests fresh metadata.</p></div><div className="about-section"><h3>Infrared color</h3><p>The color tool searches IRSA for three detector samples. Pick a measured exposure for red, green and blue. The closest dates in those samples are selected first; combining channels more than one day apart requires the mixed-date option. Every channel’s wavelength and date are shown. Only their common valid coverage is displayed. Visible colors are assigned, with independent channel contrast stretches.</p></div><div className="about-section"><h3>Comparison tools</h3><p>Compare two exposures with shared contrast, blink between them, or inspect their difference and mean. Difference and mean require the same detector, verified units, and similar wavelengths at the center and each displayed pixel. Only their common valid area is shown. Median sky removal is optional. No PSF matching or detection significance is calculated.</p><p>Use the date fields to search another season, then add those observations to the sequence. The displayed time span covers returned samples, not the complete archive history.</p></div><div className="about-section"><h3>Comparing images</h3><p>Start with the five challenge targets, choose a detector, and load exposures. Use the arrow keys to step through. Gaia rings use approximate linear proper motion; missing rings do not establish a new discovery. Suggested target coordinates are finding positions, not date-propagated ephemerides. Fast-moving targets open a wider cutout to include their more recent positions.</p></div><p className="credit-line">Independent NASA Space Apps project. Not an official NASA product.<br/>Data: NASA / JPL / Caltech / IPAC, STScI, UMass, UCLA, ESA Gaia. Reference surveys: CDS HiPS via IRSA. Name lookup: CDS Sesame.</p><div className="about-links"><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noreferrer">SPHEREx at IRSA ↗</a><a href="https://caltech-ipac.github.io/irsa-tutorials/spherex/" target="_blank" rel="noreferrer">SPHEREx tutorials ↗</a><a href="https://archive.stsci.edu/missions-and-data/gaia" target="_blank" rel="noreferrer">Gaia DR3 ↗</a><a href="https://irsa.ipac.caltech.edu/data/hips/list" target="_blank" rel="noreferrer">IRSA survey images ↗</a></div><button className="subtle-button" style=${{marginTop:16}} onClick=${embed}>Copy embed code</button></${Modal}>`:null}
+    ${colorOpen?html`<${ColorDialog} target=${target} fov=${fov} start=${start} end=${end} onClose=${()=>setColorOpen(false)}/>`:null}
+    ${compareOpen&&data&&allObs.length>1?html`<${ComparisonDialog} data=${data} initialIndex=${sourceIndex} onClose=${()=>setCompareOpen(false)}/>`:null}
+    ${notesOpen&&o?html`<${Modal} title="Exposure notes" onClose=${()=>setNotesOpen(false)}><p>${observed(o.date)} UTC · ${band} · ${o.collection.replace('spherex_','').toUpperCase()}</p><p>Valid pixels in patch: ${info?.coverage!=null?coveragePercent(info.coverage):'not available'}<br/>Hatching marks missing data.</p><p>Center wavelength: ${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'not available'}<br/>Nonzero flags: ${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'not available'}</p><label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>${gaiaError?html`<p>${gaiaError}</p>`:null}<p className="science-note">Each frame has its own intensity stretch. Wavelength, PSF, and flagged pixels can imitate changes. Compare metadata before interpreting variability.</p><button className="subtle-button" disabled=${allObs.length<2} onClick=${compare}>Compare two exposures</button><a className="subtle-button" href=${`/api/cutout/${data.key}/${sourceIndex}`} target="_blank" rel="noreferrer">Original FITS ↗</a><button className="text-button" onClick=${()=>{setNotesOpen(false);measure();}}>Measure brightness proxy</button><button className="text-button" style=${{marginLeft:14}} onClick=${downloadMetadata}>Save metadata</button></${Modal}>`:null}
     ${photOpen?html`<${Modal} title="Exploratory brightness" onClose=${()=>setPhotOpen(false)}>${coverageMode==='good'?html`<p className="science-note">These measurements sample the original returned sequence. The coverage filter controls playback.</p>`:null}${measuring?html`<p className="measurement-loading"><span className="spinner"></span> Measuring up to 12 exposures. This can take several minutes.</p>`:phot?.error?html`<p role="alert">${phot.error}</p>`:phot?html`<p>${phot.warning}</p><div className="measurement-table"><table><thead><tr><th>Date · UTC</th><th>Center µm</th><th>Brightness proxy</th></tr></thead><tbody>${phot.measurements.map(m=>html`<tr key=${m.index}><td>${date(m.date)}</td><td>${m.wavelength_um?.toFixed(3)||'—'}</td><td>${Number.isFinite(m.proxy)?m.proxy.toPrecision(5):'Unavailable'}</td></tr>`)}</tbody></table>${!phot.measurements.length?html`<p>No usable aperture measurements in these frames.</p>`:null}</div>`:null}</${Modal}>`:null}
   </div>`;
 }

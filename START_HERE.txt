@@ -1,16 +1,39 @@
-SKYMOTION 2.0.7 — INTERFACE WORDING
+sphere360 2.1.0 — DEPLOY AND TRY IT
 
 1. Open the supplied GitHub pull request while signed in as ash-lava.
    Select Merge pull request, then Confirm merge.
 
-2. Let Render deploy main. If auto-deploy is off, select:
-   Render > SkyMotion > Manual Deploy > Deploy latest commit.
+2. Let Render deploy main. If auto-deploy is off, open your existing
+   skymotion service > Manual Deploy > Deploy latest commit.
 
-3. Confirm https://skymotion-sk2p.onrender.com/api/health reports 2.0.7.
+3. Confirm https://skymotion-sk2p.onrender.com/api/health reports 2.1.0.
    Hard-refresh the site after deployment.
 
-The interface now uses “Find a target,” direct instructions and plain status
-messages. Promotional taglines were removed. Data sources, science notes,
-coverage filtering, map navigation and image handling retain their behavior.
+The displayed name becomes sphere360. Your existing repository and Render
+address keep working; they do not need to be renamed. No new dependency,
+API key or environment variable is required relative to 2.0.7.
 
-No new dependency, API key or environment variable is needed.
+TRY THE NEW TOOLS
+
+Load a target, then Compare two exposures. Find similar wavelength checks
+real FITS metadata. Difference and mean are enabled only for a usable
+wavelength/unit match. Missing pixels remain gaps.
+
+Open Observation dates (UTC), choose another season, then Add these dates
+to sequence. The normal Load button starts a new sequence. The timeline
+shows the actual returned time span, not a promise of complete coverage.
+
+Make infrared color searches three real detector samples. Check their
+exposure dates before Build color image. Combining channels more than
+one day apart needs the mixed-date option. The visible colors are assigned
+to measured infrared channels; no sky pixels are invented.
+
+The color view is a static composite, separate from grayscale playback.
+Original FITS, derived comparison FITS and provenance downloads are available.
+
+IRSA can intermittently return 502. Retry failed searches; a successful
+empty result is different from an archive error. The app uses no saved
+example or generated exposure as a substitute.
+
+Read HOW_IT_WORKS.txt for the beginner's guide, README.md for the details,
+and docs/CHALLENGE_COVERAGE.md for the requirements and remaining limits.
