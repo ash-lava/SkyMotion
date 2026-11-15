@@ -1,47 +1,41 @@
-SKYMOTION 2.0.3 — DEPLOY THE LIVE IRSA SEARCH FIX
+SKYMOTION 2.0.4 — RESTORE THE REFERENCE SKY ATLAS
 
-The changes are in a pull request against the repository connected to Render.
-No new repository, service, API key, dependency, or environment variable is needed.
+1. Open the supplied pull request on GitHub while signed in as ash-lava.
+   Scroll down, select Merge pull request, then Confirm merge.
 
-1. REVIEW AND MERGE
-   Open the supplied pull-request link and review the changes.
-   Select Merge pull request > Confirm merge to update main.
+2. Let Render auto-deploy main. If automatic deployment is off, open:
+   Render Dashboard > SkyMotion > Manual Deploy > Deploy latest commit.
 
-2. DEPLOY THE MERGED COMMIT
-   Render auto-deploy starts after the merge if enabled for main.
-   Otherwise use Render Dashboard > SkyMotion > Manual Deploy >
-   Deploy latest commit. Wait until deployment finishes.
+   Build and start commands stay the same:
+   pip install -r requirements.txt && python -m unittest -q test_server.py
+   uvicorn server:app --host 0.0.0.0 --port $PORT
 
-   Existing commands remain:
-   Build: pip install -r requirements.txt && python -m unittest -q test_server.py
-   Start: uvicorn server:app --host 0.0.0.0 --port $PORT
-   Health check: /api/health
+   One added dependency, astropy-healpix, installs automatically from
+   requirements.txt. Include the new hips_survey.py in the checkout.
+   Keep SPHEREX_COLLECTIONS=spherex_dr1. No API key or new setting is needed.
 
-   Keep SPHEREX_COLLECTIONS=spherex_dr1.
-   Include tests/fixtures/sia-m101-four.csv in the checkout for the build tests.
-   That CSV is test input only; the application never uses it as search data.
+3. Open https://skymotion-sk2p.onrender.com/api/health
+   Wait until the version is 2.0.4, then hard-refresh the app.
+   Windows/Linux: Ctrl+Shift+R. Mac: Command+Shift+R.
 
-3. CONFIRM THE VERSION
-   Open https://skymotion-sk2p.onrender.com/api/health
-   Look for version 2.0.3, then hard-refresh the app.
+4. Select Sky atlas. You should see real M101 reference imagery.
+   Try DSS, 2MASS and WISE from the survey selector, then drag or zoom.
+   On a phone, the layers icon opens survey selection.
 
-4. VERIFY LIVE SEARCH
-   The home page starts an IRSA exposure search for M101 automatically.
-   A search can take a minute or two. Step between frames or select Play.
-   Refresh archive forces a new IRSA request instead of reusing cached metadata.
+   Direct atlas link:
+   https://skymotion-sk2p.onrender.com/?mode=atlas
 
-   Choose WISE 0855 or enter other coordinates, then Load SPHEREx exposures.
-   The detector is filtered by IRSA before the response row limit is applied.
-   Use a different detector if a successful query has no matching exposures.
+5. Select SPHEREx sequence and load exposures to check that feature too.
+   The default home page still starts its live M101 SPHEREx search.
 
-   Results are deliberately small live samples to reduce proxy failures.
-   Read the limited-sample notice and exact UTC times: four M101 exposures may
-   span only minutes, and the count is not the full number of survey exposures.
-   If IRSA still fails after retries, Retry archive later. Upstream failures
-   are intermittent; this update cannot guarantee every query will succeed.
+The new atlas uses IRSA's public reference-survey tiles and the built-in map.
+It no longer loads the broken CDS map-script or HiPS2FITS service addresses.
+Reference-survey images are distinct from dated SPHEREx science exposures.
+Both paths fetch real archive data. There is no saved demonstration sequence.
 
-The black, pale-gold and white interface is retained. Sky atlas is optional
-and uses CDS services independently; it does not load during the default
-SPHEREx sequence. No saved sequence or mosaic replaces a live IRSA search.
+A healthy /api/health means the app server is running; it does not guarantee
+that an external data provider will answer every request. If an image fails,
+use Retry map and save the exact error plus the coordinates and survey.
 
-See README.md and VALIDATION.txt for behavior, test evidence and limits.
+HOW_IT_WORKS.txt explains the entire system in beginner-friendly language.
+VALIDATION.txt records what was tested and which checks used live services.

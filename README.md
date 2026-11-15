@@ -2,7 +2,15 @@
 
 A React sky explorer with a black and pale-gold interface, live IRSA searches, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** to update the existing Render service.
 
-## Version 2.0.3: bounded live IRSA search
+## Version 2.0.4: restored sky atlas
+
+The atlas now displays real DSS, 2MASS and AllWISE imagery from NASA/IPAC IRSA's public HiPS mirror. It uses the built-in map directly, with no external Aladin script or WebGL requirement. The previous CDS script/image addresses returned 404 or connection failures in the deployed service.
+
+`hips_survey.py` selects the needed survey tiles, projects them onto the requested north-up/east-left ICRS grid and returns a JPEG through `/api/sky.jpg`. Dragging, zooming, survey selection and the coordinate grid remain available. Tile count, downloads, cached bytes and simultaneous reprojection are bounded. This is a reference map built from real survey data; it is separate from SPHEREx exposure playback.
+
+Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.4**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
+
+## SPHEREx live search (introduced in 2.0.3)
 
 The supplied M101 CSV contains four valid IRSA exposure records. Live checks also found that small queries could succeed while larger queries failed at the proxy, and successful searches took about 21 seconds. This corrects the earlier diagnosis that treated the failures as a general archive outage.
 
@@ -11,12 +19,12 @@ The supplied M101 CSV contains four valid IRSA exposure records. Live checks als
 - The CSV parser handles IRSA's unquoted JSON `cloud_access` field and checks required columns and row alignment. HTML proxy pages, malformed rows, and VO errors remain failures; they cannot masquerade as empty coverage.
 - A bounded result is a **limited live sample**, not the full survey history. The API exposes `sampling_limited`, `total_lower_bound`, `query_limits`, and `queried_at`; the UI shows lower-bound counts and an explicit notice. Refresh archive bypasses the search cache.
 - The home page starts a live M101 search. All five challenge targets, arbitrary coordinates, detector selection, and cutout sizing remain available. Exact UTC exposure times distinguish frames taken on the same day.
-- The reference sky atlas opens on request. It uses independent CDS services and is not initialized during SPHEREx playback. A CDS outage therefore cannot add a map error to the default sequence view.
+- The reference sky atlas opens on request. It uses IRSA HiPS tiles and is not initialized during SPHEREx playback. Its image requests are separate from the SIA/TAP exposure searches.
 - The earlier TAP recovery, immutable artifact-sequence keys, HTTPS science-product restrictions, partial-failure handling, and metadata provenance remain in place. Both search methods now find exposures covering the field center; cutout size controls the displayed field. TAP combines wide/deep products within configured release families and reports that caveat.
 
 Runtime searches and FITS downloads use IRSA. No bundled observation listing, saved M101 sequence, AWS mosaic, synthetic sky, or offline fallback is served. The uploaded CSV is included only under `tests/fixtures/` for parser regression tests.
 
-No new package or Render environment variable is required. Keep `SPHEREX_COLLECTIONS=spherex_dr1`. After merging and deploying, `/api/health` should report `2.0.3`.
+Keep `SPHEREX_COLLECTIONS=spherex_dr1` for the SPHEREx release selection.
 
 ## Run locally
 
@@ -25,17 +33,13 @@ python -m pip install -r requirements.txt
 python -m uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000. Keep all supplied application files in the same directory. Do not open index.html as a local file. React 18 and htm are included; there is no npm build step. When you open Sky atlas, Aladin Lite v3 is attempted first. If its script, WebAssembly, or WebGL initialization fails or takes over 8 seconds, a local image-based atlas takes over. This fallback fetches real survey images through the Python API and needs no external browser script or WebGL. The Python server needs internet access to IRSA for SPHEREx, CDS for the optional atlas and name lookup, and ESA Gaia for the optional overlay.
+Open http://localhost:8000. Keep all application files together. React 18 and htm are included, with no npm build step. The server needs internet access to IRSA for the atlas and SPHEREx, CDS Sesame for optional name lookup, and ESA Gaia for the optional catalog overlay.
 
-## Version 2.0.1 map-loader repair
+## Atlas behavior
 
-- Supports both `window.A` and global lexical `A` in classic Aladin bundles.
-- Script, initialization, and graphics failures automatically switch to a local atlas.
-- `/api/sky.jpg` retrieves a real color survey image using an explicit ICRS TAN WCS. It tries the two documented CDS HiPS2FITS endpoints, validates dimensions and image bytes, and bounds cache memory and request sizes.
-- The local atlas supports drag/pan, wheel or pinch zoom, keyboard navigation, survey switching, exact sky-center updates, and a coordinate grid. Images refresh after navigation; this is an image-based fallback, not Aladin's progressive tile renderer. Its largest image dimension is limited to a 60-degree TAN field.
-- The browser requests fallback images from the same Render origin. Third-party browser script blocking and WebGL availability no longer determine whether the fallback starts. A real outage at both survey-image services can still prevent imagery.
-- Force the local atlas with `?atlas=basic`. The Retry map control retries its image request without reloading the app. Network errors show a specific message; the original Aladin failure is also recorded in the browser console.
-- New files `sky_service.py` and `sky-atlas.js` must be uploaded alongside the updated `server.py`, `app.js`, `style.css`, and `index.html`.
+The built-in atlas supports drag/pan, wheel or pinch zoom, keyboard navigation, survey switching, exact sky-center updates and a coordinate grid. It fetches a new projected image after navigation. It does not progressively stream high-resolution tiles in the browser. The largest field dimension is limited to 60 degrees. Both `?mode=atlas` and the older `?atlas=basic` open the atlas directly.
+
+The renderer uses equatorial HiPS JPEG tiles and nearest-pixel sampling via Astropy HEALPix onto a TAN grid. It is a reference display, not a flux-conserving scientific reduction. It requests at most 12 tiles per view, reducing resolution if needed, with at most four tile downloads and one reprojection at a time. Tile images must be 512 by 512 JPEGs from fixed IRSA survey paths. The byte-bounded tile and map caches expire after one hour. Missing or unreadable tiles produce an explicit error and Retry map control.
 
 ## What changed
 
@@ -89,9 +93,9 @@ node test_sky_atlas.cjs
 node test_map_loader.cjs
 ```
 
-The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test DOM layout or Aladin itself.
+The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test browser layout.
 
-Validation of version 2.0.3: **52 Python tests passed with Astropy installed; 16 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map-loader tests passed.** Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
+Validation of version 2.0.4: **59 Python tests, 16 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map lifecycle integration tests passed.** Nine unmocked browser checks cover actual atlas imagery and a live SPHEREx regression check. Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
 
 ## Data sources and documentation
 
@@ -99,8 +103,9 @@ Validation of version 2.0.3: **52 Python tests passed with Astropy installed; 16
 - [IRSA introduction: current collections and FITS structure](https://caltech-ipac.github.io/irsa-tutorials/spherex-intro/)
 - [SPHEREx cutout documentation](https://irsa.ipac.caltech.edu/data/SPHEREx/docs/cutout_tool.html)
 - [Cutout tutorial and spectral WCS](https://caltech-ipac.github.io/irsa-tutorials/spherex-cutouts/)
-- [CDS HiPS2FITS service documentation and its two endpoints](https://alasky.u-strasbg.fr/hips-image-services/hips2fits)
-- [Aladin Lite](https://aladin.cds.unistra.fr/AladinLite/) and [current API reference](https://cds-astro.github.io/aladin-lite/Aladin.html)
+- [IRSA survey mirror registry](https://irsa.ipac.caltech.edu/data/hips/list)
+- [IVOA HiPS image standard](https://www.ivoa.net/documents/HiPS/20170519/REC-HIPS-1.0-20170519.pdf)
+- [Astropy HEALPix](https://astropy-healpix.readthedocs.io/)
 - [Epsilon Indi B catalog position](https://simbad.u-strasbg.fr/simbad/sim-id?Ident=Epsilon+Indi+B)
 - [RW Aurigae catalog position](https://simbad.cds.unistra.fr/simbad/sim-id?Ident=V%2A+RW+Aur)
 - [AAVSO finding coordinates, including R Draconis](https://archive.aavso.org/index.php/aavso-bulletin-coordinates)
@@ -109,8 +114,8 @@ Validation of version 2.0.3: **52 Python tests passed with Astropy installed; 16
 
 ## Credits and license
 
-Independent NASA Space Apps project; not an official NASA product. Code: MIT, preserving the supplied LICENSE. React and htm retain their licenses; see THIRD_PARTY_LICENSES.txt. Aladin Lite is loaded from CDS and is not bundled or relicensed. Survey data retain their source terms and acknowledgments.
+Independent NASA Space Apps project; not an official NASA product. Code: MIT, preserving the supplied LICENSE. React and htm retain their licenses; see THIRD_PARTY_LICENSES.txt. Survey data retain their source terms and acknowledgments.
 
-SPHEREx data: NASA / JPL / Caltech / IPAC. Reference atlas: DSS / STScI, 2MASS / UMass / IPAC, WISE / NASA / JPL / UCLA. Catalog overlay: ESA Gaia DR3. Viewer and name resolution: CDS Aladin / Sesame.
+SPHEREx data: NASA / JPL / Caltech / IPAC. Reference atlas: DSS / STScI, 2MASS / UMass / IPAC, WISE / NASA / JPL / UCLA. Catalog overlay: ESA Gaia DR3. HiPS survey generation: CDS. Survey hosting: NASA/IPAC IRSA. Name resolution: CDS Sesame.
 
 Publications using SPHEREx data should include the required mission acknowledgment on the linked IRSA mission page.
