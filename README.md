@@ -2,13 +2,19 @@
 
 A React sky explorer with a black and pale-gold interface, live IRSA searches, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** to update the existing Render service.
 
-## Version 2.0.6: visible missing data and a coverage filter
+## Version 2.0.7: plain interface wording
+
+The interface uses direct labels and instructions. The sidebar reads “Find a target” and “Search by name or enter coordinates.” Promotional taglines were removed from the header, introduction, loading screen, empty state and About dialog. Source credits, coverage explanations and scientific limits remain available. See `docs/COPY_REFERENCES.txt` for the published astronomy-site copy used as reference.
+
+After deployment, `/api/health` should report **2.0.7**. No new package or setting is required.
+
+## Missing data and coverage (introduced in 2.0.6)
 
 Missing SPHEREx science pixels are transparent and show a hatched background, with a coverage percentage and legend. Valid dark pixels remain opaque. No pixels are filled from another exposure or the reference atlas.
 
 The timeline's **Coverage** selector defaults to **All frames**. Choose **At least 95% covered** to check the loaded cutouts and restrict playback to verified frames meeting that threshold. The first check downloads science cutouts and can take a minute or longer; progress is shown, playback pauses, and selecting All frames cancels the check. Unverified frames are excluded from this filtered view and counted separately. All frames remain available. Coverage measures finite science pixels, independently of quality flags.
 
-Filtered navigation retains the original exposure identifiers. Metadata export retains every returned observation, measured coverage where known, displayed source indices and the active threshold. No new dependency or setting is needed; `/api/health` should report **2.0.6** after deployment.
+Filtered navigation retains the original exposure identifiers. Metadata export retains every returned observation, measured coverage where known, displayed source indices and the active threshold. No new dependency or setting is needed; `/api/health` should report **2.0.7** after deployment.
 
 ## Free sky navigation (introduced in 2.0.5)
 
@@ -16,7 +22,7 @@ Pan beyond the selected object, enter any valid RA/Dec, and zoom out to a comple
 
 The **All sky** control fits the complete sphere into the viewport. Coordinate entry opens in atlas mode; suggested places remain available in a collapsible list. A marker identifies the selected SPHEREx patch without bounding the map. **Use this sky position** selects the current map center for a later exposure search while preserving the surrounding view.
 
-No dependency or environment change is needed relative to 2.0.4. After deployment, `/api/health` should report **2.0.6**.
+No dependency or environment change is needed relative to 2.0.4. After deployment, `/api/health` should report **2.0.7**.
 
 ## Sky atlas
 
@@ -24,7 +30,7 @@ The atlas now displays real DSS, 2MASS and AllWISE imagery from NASA/IPAC IRSA's
 
 `hips_survey.py` selects the needed survey tiles, projects them onto the requested ICRS view, with north up at its center and east left and returns a JPEG through `/api/sky.jpg`. Dragging, zooming, survey selection and the coordinate grid remain available. Tile count, downloads, cached bytes and simultaneous reprojection are bounded. This is a reference map built from real survey data; it is separate from SPHEREx exposure playback.
 
-Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.6**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
+Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.7**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
 
 ## SPHEREx live search (introduced in 2.0.3)
 
@@ -82,7 +88,7 @@ The cache is disposable. It can disappear on a Render restart. The app needs no 
 
 ## Share a patch
 
-Use Share patch, or construct a URL:
+Use Share view, or construct a URL:
 
 ```text
 https://YOUR-SITE/?ra=133.7951292&dec=-7.2451472&fov=12&band=D2&layer=wise&mode=sequence

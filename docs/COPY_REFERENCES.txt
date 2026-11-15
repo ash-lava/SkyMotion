@@ -1,0 +1,35 @@
+SkyMotion interface wording — 15 November 2026
+
+Published references checked:
+
+Stellarium
+https://stellarium.org/
+Its introduction describes a planetarium for a computer in concrete terms.
+Reference: name the tool and its purpose without a poetic promise.
+
+NASA SkyView
+https://skyview.gsfc.nasa.gov/current/cgi/titlepage.pl
+Its query interface labels the inputs as Coordinates or Source and Survey.
+Reference: use task-oriented labels that explain what a person can enter.
+
+Zooniverse
+https://www.zooniverse.org/
+Its established line is “People-Powered Research.”
+Reference: a short description can communicate the purpose on its own.
+
+These references informed the use of short descriptions and concrete action
+labels in SkyMotion.
+
+Applied to SkyMotion:
+- Header: SkyMotion branding and existing controls, without a second tagline.
+- Sidebar: “Find a target” / “Search by name or enter coordinates.”
+- Loading: “Searching for observations…”
+- Empty: “No observations loaded” or “No observations found.”
+- Failure: “Couldn’t load observations.” with the specific cause below it.
+- About: “About SkyMotion.”
+- Sharing: “Link copied.”
+- Source note: “Data: NASA/IPAC IRSA.”
+- Browser title: “SkyMotion — SPHEREx image viewer.”
+
+Source credits, missing-data legends, incomplete-search notices and scientific
+limitations remain factual interface content, with simpler wording where useful.
