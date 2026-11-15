@@ -72,7 +72,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.5');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.6');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -116,7 +116,27 @@ class APITests(unittest.TestCase):
     def test_png_orientation_and_cache_headers(self):
         array=np.tile(np.arange(20,dtype=float)[:,None],(1,20))
         with patch.object(server,'get_image',return_value=(array,{},None,{})):result=self.client.get('/api/frame/'+'a'*24+'/0.png')
-        pixels=np.asarray(Image.open(io.BytesIO(result.content)));self.assertGreater(pixels[0,10],pixels[-1,10]);self.assertEqual(result.headers['cache-control'],'no-store')
+        pixels=np.asarray(Image.open(io.BytesIO(result.content)));self.assertGreater(int(pixels[0,10,0]),int(pixels[-1,10,0]));self.assertEqual(result.headers['cache-control'],'no-store')
+    def test_missing_pixels_are_transparent_but_valid_zero_is_opaque(self):
+        array=np.zeros((8,8),dtype=float);array[0,0]=np.nan;array[1,1]=np.inf;array[2,2]=-np.inf
+        with patch.object(server,'get_image',return_value=(array,{},None,{})):
+            response=self.client.get('/api/frame/'+'a'*24+'/0.png')
+            info=self.client.get('/api/frame-info/'+'a'*24+'/0').json()
+        pixels=np.asarray(Image.open(io.BytesIO(response.content)))
+        self.assertEqual(pixels.shape,(8,8,4))
+        np.testing.assert_array_equal(pixels[:,:,3],np.flipud(np.isfinite(array).astype(np.uint8)*255))
+        self.assertTrue(np.all(pixels[:,:,:3]==0));self.assertEqual(pixels[0,0,3],255)
+        self.assertEqual(info['missing_pixels'],3);self.assertEqual(info['valid_pixels'],61)
+        self.assertEqual(info['total_pixels'],64);self.assertEqual(info['coverage'],61/64)
+    def test_valid_science_values_retain_the_existing_display_stretch(self):
+        array=np.arange(100,dtype=float).reshape(10,10);array[0,0]=np.nan
+        low,high=np.percentile(array[np.isfinite(array)],[5,99.5])
+        expected=np.flipud(np.uint8(np.sqrt(np.clip((np.nan_to_num(array,nan=low)-low)/(high-low),0,1))*255))
+        with patch.object(server,'get_image',return_value=(array,{},None,{})):
+            response=self.client.get('/api/frame/'+'a'*24+'/0.png')
+        pixels=np.asarray(Image.open(io.BytesIO(response.content)))
+        np.testing.assert_array_equal(pixels[:,:,0],expected)
+        np.testing.assert_array_equal(pixels[:,:,0],pixels[:,:,1]);np.testing.assert_array_equal(pixels[:,:,1],pixels[:,:,2])
     def test_only_frontend_assets_public(self):
         for path in ('/','/static/app.js','/static/style.css','/static/vendor/htm.js'):self.assertEqual(self.client.get(path).status_code,200)
         self.assertEqual(self.client.get('/static/server.py').status_code,404);self.assertEqual(self.client.get('/static/archive_client.py').status_code,404)

@@ -1,0 +1,64 @@
+{
+  "target": "M101",
+  "ra": 210.80227,
+  "dec": 54.34895,
+  "fov_arcmin": 6,
+  "channels": {
+    "red": "D6",
+    "green": "D3",
+    "blue": "D1"
+  },
+  "observations": [
+    {
+      "id": "2025W21_2C_0029_1",
+      "collection": "spherex_dr1",
+      "band": "SPHEREx-D1",
+      "mjd": 60817.668637,
+      "date": "2025-05-22T16:02:50.236800Z",
+      "url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W21_2C/l2b-v27-2026-199/1/level2_2025W21_2C_0029_1D1_spx_l2b-v27-2026-199.fits",
+      "em_min": 7.455e-07,
+      "em_max": 1.1167e-06,
+      "exptime": 113.5826,
+      "detector": "D1",
+      "center_wavelength_um": 0.9905724551026259,
+      "coverage": 1.0,
+      "unit": "MJy / sr",
+      "sha256_download": "197eea9423dfce75e38303e7c405ea4dbe0dd3f51524d5d7fb8a662c3c678ccb"
+    },
+    {
+      "id": "2025W19_2B_0101_1",
+      "collection": "spherex_dr1",
+      "band": "SPHEREx-D3",
+      "mjd": 60804.148555,
+      "date": "2025-05-09T03:33:55.152000Z",
+      "url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_2B/l2b-v27-2026-198/3/level2_2025W19_2B_0101_1D3_spx_l2b-v27-2026-198.fits",
+      "em_min": 1.6301e-06,
+      "em_max": 2.4346e-06,
+      "exptime": 113.5826,
+      "detector": "D3",
+      "center_wavelength_um": 2.195528584631283,
+      "coverage": 1.0,
+      "unit": "MJy / sr",
+      "sha256_download": "4180a1e342324a8593b1a5f78201557277ed8e509c84e5779efe964489f4af2c"
+    },
+    {
+      "id": "2025W19_2B_0101_1",
+      "collection": "spherex_dr1",
+      "band": "SPHEREx-D6",
+      "mjd": 60804.148555,
+      "date": "2025-05-09T03:33:55.152000Z",
+      "url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_2B/l2b-v27-2026-198/6/level2_2025W19_2B_0101_1D6_spx_l2b-v27-2026-198.fits",
+      "em_min": 4.4115e-06,
+      "em_max": 5.0096e-06,
+      "exptime": 113.5826,
+      "detector": "D6",
+      "center_wavelength_um": 4.8509102622109666,
+      "coverage": 0.9989149305555556,
+      "unit": "MJy / sr",
+      "sha256_download": "26c14c84f69ea28a1a3cf3f26932fab7ad5cf9c5e89ab4211b49af764de164cb"
+    }
+  ],
+  "common_coverage": 0.9989149305555556,
+  "display": "Per-channel 5\u201399.5 percentile square-root stretch; north up, east left.",
+  "warning": "This is a static mixed-date feasibility preview, not simultaneous color or color playback."
+}
