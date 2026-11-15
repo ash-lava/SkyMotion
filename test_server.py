@@ -38,11 +38,11 @@ class ArchiveTests(unittest.TestCase):
         def table(ra,dec,radius,collection):
             if collection=='spherex_qr3':raise archive.ArchiveError('HTTP 502')
             return [row()],False
-        with patch.object(archive,'get_table',side_effect=table),patch.object(archive,'COLLECTIONS',('spherex_dr1','spherex_qr3')):
+        with patch.object(archive,'get_table',side_effect=table),patch.object(archive,'COLLECTIONS',('spherex_dr1','spherex_qr3')),patch.object(archive,'tap_rows',side_effect=archive.ArchiveError('TAP unavailable')):
             rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4)
         self.assertEqual(total,1);self.assertEqual(live,['spherex_dr1']);self.assertIn('spherex_qr3',failed);self.assertTrue(warnings)
     def test_all_failed_is_not_empty_success(self):
-        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('502')),self.assertRaises(archive.ArchiveError):archive.search(12,3,.1,'D2',4)
+        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('502')),patch.object(archive,'tap_rows',side_effect=archive.ArchiveError('502')),self.assertRaises(archive.ArchiveError):archive.search(12,3,.1,'D2',4)
     def test_empty_is_valid_success(self):
         with patch.object(archive,'get_table',return_value=([],False)):rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4)
         self.assertEqual(rows,[]);self.assertTrue(live)
@@ -71,7 +71,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.1');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.2');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -172,4 +172,90 @@ class AstronomyTests(unittest.TestCase):
         table=Table(rows=[row()]);buffer=io.BytesIO();table.write(buffer,format='votable')
         with patch.object(archive,'fetch_bytes',return_value=buffer.getvalue()):result,overflow=archive.get_table(1,0,.01,'spherex_dr1')
         self.assertEqual(len(result),1);self.assertFalse(overflow)
+
+class SearchRecoveryTests(unittest.TestCase):
+    def test_tap_recovers_all_failed_sia_collections(self):
+        diagnostics={}
+        fallback={'url':URL,'id':'recovered','band':'SPHEREx-D2','mjd':61000,'collection':'spherex_dr1'}
+        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('502')),patch.object(archive,'tap_rows',return_value=([fallback],False)) as tap:
+            rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4,diagnostics=diagnostics)
+        self.assertEqual(total,1);self.assertEqual(rows,[fallback]);self.assertEqual(live,[])
+        self.assertTrue(failed);self.assertTrue(diagnostics['tap']['ok']);self.assertEqual(diagnostics['method'],'TAP')
+        self.assertTrue(any('wide/deep' in w for w in warnings));tap.assert_called_once_with(12,3,'D2')
+    def test_working_sia_does_not_need_fallback(self):
+        with patch.object(archive,'get_table',return_value=([],False)),patch.object(archive,'tap_rows') as tap:
+            rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4)
+        self.assertEqual(rows,[]);self.assertTrue(live);tap.assert_not_called()
+    def test_valid_empty_tap_is_distinct_from_an_outage(self):
+        diagnostics={}
+        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('502')),patch.object(archive,'tap_rows',return_value=([],False)):
+            rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4,diagnostics=diagnostics)
+        self.assertEqual(rows,[]);self.assertEqual(total,0);self.assertTrue(diagnostics['tap']['ok'])
+    def test_partial_sia_and_tap_artifacts_are_deduplicated(self):
+        fallback={'url':URL.replace('example','0'),'id':'0','band':'SPHEREx-D2','mjd':61000,'collection':'spherex_dr1'}
+        def table(ra,dec,radius,collection):
+            if collection=='spherex_qr3':raise archive.ArchiveError('502')
+            return [row()],False
+        diagnostics={}
+        with patch.object(archive,'COLLECTIONS',('spherex_dr1','spherex_qr3')),patch.object(archive,'get_table',side_effect=table),patch.object(archive,'tap_rows',return_value=([fallback],True)):
+            rows,total,warnings,live,failed=archive.search(12,3,.1,'D2',4,diagnostics=diagnostics)
+        self.assertEqual(total,1);self.assertEqual(diagnostics['method'],'SIA2 + TAP')
+        self.assertTrue(any('10,000' in w for w in warnings))
+    def test_url_validation_rejects_traversal_queries_and_bad_ports(self):
+        for url in ['https://[broken-address',URL+'?url=https://example.com',URL+'#fragment',URL.replace('/level2/','/level2/../'),URL.replace('example.fits','%2e%2e/secret.fits'),URL.replace('.edu/','.edu:bad/')]:
+            with self.subTest(url=url):self.assertFalse(archive.safe_image_url(url))
+
+class SnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.cache=patch.object(server,'CACHE',Path(self.tmp.name));self.cache.start();self.client=TestClient(server.app)
+        self.status=patch.dict(server.STATUS,{'checked':None,'live':[],'unavailable':{},'tap':None},clear=True);self.status.start()
+    def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
+    def test_refresh_preserves_old_search_frame_mapping(self):
+        with patch.object(archive,'get_table',return_value=([row(0)],False)):
+            first=self.client.get('/api/observations?ra=1&dec=0').json()
+        with patch.object(archive,'get_table',return_value=([row(1)],False)):
+            second=self.client.get('/api/observations?ra=1&dec=0&refresh=true').json()
+        self.assertNotEqual(first['key'],second['key'])
+        self.assertEqual(server.read_search(first['key'])['observations'][0]['id'],'0')
+        self.assertEqual(server.read_search(second['key'])['observations'][0]['id'],'1')
+        cached=self.client.get('/api/observations?ra=1&dec=0').json();self.assertEqual(cached,second)
+    def test_tap_recovery_does_not_claim_sia_is_live(self):
+        fallback={'url':URL,'id':'recovered','band':'SPHEREx-D2','mjd':61000,'collection':'spherex_dr1'}
+        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('502')),patch.object(archive,'tap_rows',return_value=([fallback],False)):
+            response=self.client.get('/api/observations?ra=1&dec=0')
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json()['search_method'],'TAP')
+        status=self.client.get('/api/archive').json()
+        self.assertEqual(status['status'],'ready');self.assertEqual(status['live'],[]);self.assertTrue(status['tap']['ok'])
+    def test_both_search_services_fail_with_structured_error(self):
+        with patch.object(archive,'get_table',side_effect=archive.ArchiveError('SIA 502')),patch.object(archive,'tap_rows',side_effect=archive.ArchiveError('TAP 502')):
+            response=self.client.get('/api/observations?ra=1&dec=0')
+        self.assertEqual(response.status_code,503);self.assertEqual(response.json()['detail']['code'],'SPHEREX_UNAVAILABLE')
+        status=self.client.get('/api/archive').json();self.assertFalse(status['tap']['ok']);self.assertFalse(list(server.CACHE.glob('*.json')))
+    def test_incomplete_refresh_removes_previous_complete_lookup(self):
+        with patch.object(archive,'get_table',return_value=([row(0)],False)):
+            self.client.get('/api/observations?ra=1&dec=0')
+        with patch.object(archive,'search',return_value=([{'url':URL,'id':'new'}],1,['partial'],[],{})) as search:
+            self.client.get('/api/observations?ra=1&dec=0&refresh=true')
+            self.client.get('/api/observations?ra=1&dec=0')
+        self.assertEqual(search.call_count,2);self.assertFalse(list(server.CACHE.glob('*.ref')))
+
+@unittest.skipUnless(importlib.util.find_spec('astropy'),'Astropy is not installed in this test environment')
+class TAPParsingTests(unittest.TestCase):
+    def test_tap_normalizes_current_release_and_enforces_family_and_detector(self):
+        from astropy.table import Table
+        urls=[URL,URL.replace('/dr1/','/qr3/'),URL.replace('example','d4'),'https://example.org/not-a-science-file']
+        table=Table({'uri':[u.removeprefix('https://irsa.ipac.caltech.edu/') for u in urls],
+                     'time_bounds_lower':[61000.,61001.,61002.,61003.],
+                     'energy_bandpassname':['SPHEREx-D2','SPHEREx-D2','SPHEREx-D4','SPHEREx-D2']})
+        buffer=io.BytesIO();table.write(buffer,format='votable')
+        with patch.object(archive,'COLLECTIONS',('spherex_dr1',)),patch.object(archive,'fetch_bytes',return_value=buffer.getvalue()) as fetch:
+            rows,overflow=archive.tap_rows(1,2,'D2')
+        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['url'],URL);self.assertIsNone(rows[0]['exptime']);self.assertFalse(overflow)
+        self.assertIn('spherex.artifact',fetch.call_args.args[1]['QUERY'])
+        self.assertIn("p.energy_bandpassname = 'SPHEREx-D2'",fetch.call_args.args[1]['QUERY'])
+    def test_missing_required_columns_are_not_a_healthy_empty_result(self):
+        from astropy.table import Table
+        buffer=io.BytesIO();Table({'unexpected':[1]}).write(buffer,format='votable')
+        with self.assertRaises(archive.ArchiveError):archive.read_table(buffer.getvalue(),('access_url',))
+
 if __name__=='__main__':unittest.main()

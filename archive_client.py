@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 SIA_URL = 'https://irsa.ipac.caltech.edu/SIA'
+TAP_URL = 'https://irsa.ipac.caltech.edu/TAP/sync'
 # DR1 is the collection that answered in the reported deployment. QR3 is optional.
 SUPPORTED = ('spherex_dr1', 'spherex_dr1_deep', 'spherex_qr3', 'spherex_qr3_deep')
 requested = [c.strip() for c in os.getenv('SPHEREX_COLLECTIONS', 'spherex_dr1').split(',') if c.strip()]
@@ -62,23 +63,32 @@ def validate_votable(content):
         raise ArchiveError('IRSA returned no result table. Please retry shortly.')
     return overflow
 
-def get_table(ra, dec, radius, collection):
-    # Lazy import also lets health/static routes start before any astronomy work.
+def read_table(raw, required):
     from astropy.table import Table
-    raw = fetch_bytes(SIA_URL, {'COLLECTION': collection,
-        'POS': f'CIRCLE {ra:.8f} {dec:.8f} {radius:.8f}', 'RESPONSEFORMAT': 'votable'})
     overflow = validate_votable(raw)
     try:
         table = Table.read(io.BytesIO(raw), format='votable')
     except Exception as exc:
         raise ArchiveError('IRSA returned a table that could not be read.') from exc
+    if not set(required).issubset(table.colnames):
+        raise ArchiveError('IRSA returned a table without the required image metadata.')
     return table, overflow
 
+def get_table(ra, dec, radius, collection):
+    raw = fetch_bytes(SIA_URL, {'COLLECTION': collection,
+        'POS': f'CIRCLE {ra:.8f} {dec:.8f} {radius:.8f}', 'RESPONSEFORMAT': 'votable'}, timeout=15)
+    return read_table(raw, ('access_url', 'energy_bandpassname', 't_min'))
+
 def safe_image_url(url):
-    parsed = urlparse(url)
-    return (parsed.scheme == 'https' and parsed.hostname == 'irsa.ipac.caltech.edu'
-            and parsed.port in (None, 443) and parsed.username is None
-            and parsed.path.startswith('/ibe/data/spherex/'))
+    try:
+        parsed = urlparse(url)
+    except (TypeError, ValueError):
+        return False
+    return (parsed.scheme == 'https' and parsed.netloc in
+            ('irsa.ipac.caltech.edu', 'irsa.ipac.caltech.edu:443')
+            and re.fullmatch(r'/ibe/data/spherex/[a-z0-9_]+/level2/[A-Za-z0-9_./-]+\.fits', parsed.path)
+            and '..' not in parsed.path.split('/') and not parsed.query and not parsed.fragment)
+
 
 def text_value(row, key, default=''):
     value = row[key] if key in row.keys() else default
@@ -105,8 +115,43 @@ def date_from_mjd(value):
     except (ValueError, OverflowError):
         return ''
 
-def search(ra, dec, radius, detector, limit):
+def tap_rows(ra, dec, detector):
+    """IRSA's documented artifact/plane query; it selects images covering the center.
+
+    TAP combines wide/deep products within each requested release family. We report
+    that difference instead of pretending it is the same footprint query as SIA.
+    """
+    band = '' if detector == 'all' else f" AND p.energy_bandpassname = 'SPHEREx-{detector}'"
+    query = f"""SELECT a.uri, p.time_bounds_lower, p.energy_bandpassname
+        FROM spherex.artifact a JOIN spherex.plane p ON a.planeid = p.planeid
+        WHERE 1=CONTAINS(POINT('ICRS', {ra:.8f}, {dec:.8f}), p.poly)
+        {band} ORDER BY p.time_bounds_lower"""
+    raw = fetch_bytes(TAP_URL, {'REQUEST': 'doQuery', 'LANG': 'ADQL', 'FORMAT': 'votable',
+                               'QUERY': query, 'MAXREC': 10000}, timeout=20)
+    table, overflow = read_table(raw, ('uri', 'time_bounds_lower', 'energy_bandpassname'))
+    families = {c.removesuffix('_deep').removeprefix('spherex_') for c in COLLECTIONS}
+    rows = []
+    for item in table:
+        uri = text_value(item, 'uri')
+        url = uri if uri.startswith('https://') else 'https://irsa.ipac.caltech.edu/' + uri.lstrip('/')
+        if not safe_image_url(url):
+            continue
+        release = urlparse(url).path.split('/')[4]
+        bandpass = text_value(item, 'energy_bandpassname')
+        if release not in families or (detector != 'all' and bandpass.upper() != f'SPHEREX-{detector}'):
+            continue
+        mjd = number_value(item, 'time_bounds_lower')
+        rows.append({'id': urlparse(url).path.rsplit('/', 1)[-1].removesuffix('.fits'),
+                     'collection': 'spherex_' + release, 'band': bandpass,
+                     'mjd': mjd, 'date': date_from_mjd(mjd), 'url': url,
+                     'em_min': None, 'em_max': None, 'exptime': None})
+    return rows, overflow
+
+def search(ra, dec, radius, detector, limit, *, diagnostics=None):
+    """Return rows and collection outcomes; optionally record the separate TAP outcome."""
     rows, warnings, failed, successful = [], [], {}, []
+    outcomes = diagnostics if diagnostics is not None else {}
+    outcomes.update(method='SIA2', tap=None)
     with ThreadPoolExecutor(max_workers=min(4, len(COLLECTIONS))) as pool:
         futures = {pool.submit(get_table, ra, dec, radius, c): c for c in COLLECTIONS}
         for future in as_completed(futures):
@@ -132,9 +177,22 @@ def search(ra, dec, radius, detector, limit):
                 reason = str(exc) if isinstance(exc, ArchiveError) else 'The collection could not be read.'
                 warnings.append(f'{collection}: {reason}')
                 failed[collection] = reason
-    if not successful:
-        raise ArchiveError('SPHEREx is temporarily unreachable at IRSA. Your sky map still works. Retry the exposure search shortly.')
-    # Remove duplicate archive rows; retain independent observations.
+    outcomes['unavailable'] = dict(failed)
+    if failed:
+        try:
+            fallback, overflow = tap_rows(ra, dec, detector)
+            rows.extend(fallback)
+            outcomes.update(method='SIA2 + TAP' if successful else 'TAP', tap={'ok': True, 'error': None})
+            warnings.append('IRSA TAP supplied an alternative search covering the field center. '
+                            'It combines wide/deep images within the configured release families.')
+            if overflow:
+                warnings.append('IRSA TAP truncated this query at 10,000 images.')
+        except ArchiveError as exc:
+            outcomes['tap'] = {'ok': False, 'error': str(exc)}
+            warnings.append('The IRSA TAP fallback is also temporarily unavailable.')
+    if not successful and not (outcomes['tap'] and outcomes['tap']['ok']):
+        raise ArchiveError('SPHEREx search is temporarily unreachable through both IRSA services. '
+                           'Your sky map still works. Retry the exposure search shortly.')
     rows = list({r['url']: r for r in rows}.values())
     rows.sort(key=lambda r: (r['mjd'] if r['mjd'] is not None else float('inf'), r['band'], r['id']))
     total = len(rows)

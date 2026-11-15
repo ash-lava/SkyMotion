@@ -24,14 +24,14 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 app = FastAPI(title='SkyMotion', version=VERSION)
 from sky_service import router as sky_router
 app.include_router(sky_router)
 STATE_LOCK = threading.RLock()
 IMAGE_LOCK = threading.Lock()  # bound memory / simultaneous FITS decoding on small Render instances
 FRAMES, GAIA = OrderedDict(), OrderedDict()
-STATUS = {'checked': None, 'live': [], 'unavailable': {}}
+STATUS = {'checked': None, 'live': [], 'unavailable': {}, 'tap': None, 'search_method': None}
 SIZE = 192
 
 
@@ -47,12 +47,22 @@ def key_for(ra, dec, fov, detector, limit):
 
 def write_cache(key, payload):
     temp = CACHE / f'{key}.{uuid.uuid4().hex}.tmp'
-    temp.write_text(json.dumps(payload), encoding='utf-8')
-    temp.replace(CACHE / f'{key}.json')
-    # Bound persistent disk usage. Search files contain metadata only.
-    files = sorted(CACHE.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in files[300:]:
-        path.unlink(missing_ok=True)
+    try:
+        temp.write_text(json.dumps(payload, allow_nan=False), encoding='utf-8')
+        temp.replace(CACHE / f'{key}.json')
+    finally:
+        temp.unlink(missing_ok=True)
+    # Metadata snapshots are immutable by artifact order; only the small lookup pointer changes.
+    with STATE_LOCK:
+        files = sorted(CACHE.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+        for path in files[300:]:
+            path.unlink(missing_ok=True)
+        for ref in CACHE.glob('*.ref'):
+            try:
+                if not (CACHE / (ref.read_text().strip() + '.json')).exists():
+                    ref.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def read_search(key):
@@ -70,7 +80,7 @@ def public_payload(payload):
 
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'version': VERSION, 'archive': 'NASA/IPAC IRSA SIA2', 'collections': archive.COLLECTIONS}
+    return {'ok': True, 'version': VERSION, 'archive': 'NASA/IPAC IRSA SIA2 + TAP', 'collections': archive.COLLECTIONS}
 
 
 @app.get('/api/archive')
@@ -78,7 +88,7 @@ def archive_status():
     # This reports the last real query; it does not send five speculative probes.
     with STATE_LOCK:
         return {**STATUS, 'configured': archive.COLLECTIONS,
-                'status': 'unchecked' if STATUS['checked'] is None else ('ready' if STATUS['live'] else 'unavailable')}
+                'status': 'unchecked' if STATUS['checked'] is None else ('ready' if STATUS['live'] or (STATUS.get('tap') or {}).get('ok') else 'unavailable')}
 
 
 @app.get('/api/observations')
@@ -87,29 +97,47 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
                  limit: int = Query(24, ge=2, le=64), refresh: bool = False):
     if detector not in ('all', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6'):
         raise HTTPException(400, 'Choose a detector from D1 to D6.')
-    key = key_for(ra, dec, fov, detector, limit)
-    path = CACHE / f'{key}.json'
-    if path.exists() and not refresh and time.time() - path.stat().st_mtime < CACHE_TTL:
-        return public_payload(read_search(key))
+    lookup_key = key_for(ra, dec, fov, detector, limit)
+    if not refresh:
+        try:
+            cached_key = (CACHE / f'{lookup_key}.ref').read_text().strip()
+            path = CACHE / f'{cached_key}.json'
+            if time.time() - path.stat().st_mtime < CACHE_TTL:
+                return public_payload(read_search(cached_key))
+        except (OSError, HTTPException):
+            pass
+    diagnostics = {}
     try:
-        # A circle enclosing the square field, in degrees.
-        rows, total, warnings, live, failed = archive.search(ra, dec, fov * math.sqrt(2) / 120, detector, limit)
+        # SIA searches all image footprints intersecting the square field's enclosing circle.
+        rows, total, warnings, live, failed = archive.search(
+            ra, dec, fov * math.sqrt(2) / 120, detector, limit, diagnostics=diagnostics)
     except archive.ArchiveError as exc:
         with STATE_LOCK:
-            STATUS.update(checked=time.time(), live=[], unavailable={c: str(exc) for c in archive.COLLECTIONS})
-        raise HTTPException(503, str(exc), headers={'Retry-After': '30'})
+            STATUS.update(checked=time.time(), live=[], unavailable=diagnostics.get('unavailable') or {c: str(exc) for c in archive.COLLECTIONS},
+                          tap=diagnostics.get('tap'), search_method=None)
+        raise HTTPException(503, {'code': 'SPHEREX_UNAVAILABLE', 'message': str(exc)}, headers={'Retry-After': '30'})
+    method = diagnostics.get('method', 'SIA2')
     with STATE_LOCK:
-        STATUS.update(checked=time.time(), live=live, unavailable=failed)
+        STATUS.update(checked=time.time(), live=live, unavailable=failed,
+                      tap=diagnostics.get('tap'), search_method=method)
+    # A changed set/order of artifacts gets new frame URLs, even for identical field settings.
+    key = hashlib.sha256((lookup_key + json.dumps(rows, sort_keys=True)).encode()).hexdigest()[:24]
     payload = {'key': key, 'observations': rows, 'total': total, 'warnings': warnings,
-               'source': 'NASA/IPAC IRSA SPHEREx', 'real': True, 'ra': ra, 'dec': dec,
-               'fov_arcmin': fov, 'detector': detector, 'collections': live,
-               'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
-    # Never cache an incomplete response: failed optional collections can recover.
+               'source': 'NASA/IPAC IRSA SPHEREx', 'search_method': method, 'real': True,
+               'ra': ra, 'dec': dec, 'fov_arcmin': fov, 'detector': detector,
+               'collections': live, 'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
+    write_cache(key, payload)
+    ref = CACHE / f'{lookup_key}.ref'
     if not warnings:
-        write_cache(key, payload)
-    elif rows:
-        write_cache(key, payload)
-        os.utime(path, (0, 0))
+        temp = CACHE / f'{lookup_key}.{uuid.uuid4().hex}.tmp'
+        try:
+            temp.write_text(key)
+            temp.replace(ref)
+        finally:
+            temp.unlink(missing_ok=True)
+    else:
+        # Preserve partial snapshots for their loaded frames, but retry the next search.
+        ref.unlink(missing_ok=True)
     return public_payload(payload)
 
 
@@ -142,6 +170,8 @@ def image_data(key, index):
     if index < 0 or index >= len(data['observations']):
         raise HTTPException(404, 'Exposure not found.')
     row = data['observations'][index]
+    if not archive.safe_image_url(row['url']):
+        raise HTTPException(400, 'Invalid archive image link. Load this patch again.')
     # Include URL: refreshing a query cannot accidentally reuse a different exposure.
     identity = (key, row['url'])
     with IMAGE_LOCK:

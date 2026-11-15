@@ -1,133 +1,43 @@
-SKYMOTION 2.0.1 — MAP LOADER FIX / GITHUB + RENDER UPDATE
+SKYMOTION 2.0.2 — UPDATE THE EXISTING RENDER SERVICE
 
-You do not need a new repository, a new Render service, npm, or an API key.
-The app is React + a Python API, and keeps the same flat file layout.
+The app is already in the GitHub repository connected to Render.
+There is no ZIP to upload and no new repository or Render service to create.
 
-1. UNZIP THE DOWNLOAD
-   Extract SkyMotion-map-fix.zip on your computer.
-   Open the extracted folder. You should see server.py, archive_client.py,
-   app.js, index.html, style.css, requirements.txt, and the other files.
+1. REVIEW AND MERGE THE PULL REQUEST
+   Open the supplied pull-request link on GitHub.
+   Review the changes, then select Merge pull request > Confirm merge.
+   This updates main. The branch containing the proposed changes is separate
+   from main until you merge it.
 
-2. OPEN THE RIGHT GITHUB FOLDER
-   Open the GitHub repository already connected to your Render service.
-   Select the branch Render deploys (usually main).
-   Open the folder containing your current server.py and requirements.txt.
-   If the existing app is at the top level, stay at the top level.
+2. DEPLOY THE MERGED COMMIT
+   If Render auto-deploy is on for main, it starts after the merge.
+   Otherwise open Render Dashboard > SkyMotion > Manual Deploy >
+   Deploy latest commit. Wait for the deployment to finish.
 
-3. UPLOAD THE FILES
-   Click Add file > Upload files.
-   Drag ALL the extracted files into the upload area.
-   Upload the FILES INSIDE the folder, not the ZIP or its outer folder.
-   Files with the same names replace their old versions.
-   Make sure sky_service.py and sky-atlas.js are included: they are new.
-   Also include archive_client.py and test_server.py from the previous update.
-   Keep the supplied React, ReactDOM, and htm files beside server.py.
-   You do not need to delete the existing repository first.
+   Existing commands remain:
+   Build: pip install -r requirements.txt && python -m unittest -q test_server.py
+   Start: uvicorn server:app --host 0.0.0.0 --port $PORT
+   Health check: /api/health
 
-4. SAVE THE CHANGE
-   Commit message: Refresh SkyMotion UI and repair SPHEREx archive handling
-   Commit to the branch connected to Render if GitHub allows it.
-   If GitHub requires a new branch, create a pull request and merge it into
-   Render's connected branch. Render must see the merged commit.
+   Keep SPHEREX_COLLECTIONS=spherex_dr1 for the current release selection.
+   DR1 deep, QR3, and QR3 deep remain optional documented collections.
+   No new Python dependency, API key, or environment variable is needed.
 
-5. FIX THE RENDER ENVIRONMENT SETTING
-   Open Render Dashboard > your existing SkyMotion service > Environment.
-   Add or edit this variable:
-
-   Key:   SPHEREX_COLLECTIONS
-   Value: spherex_dr1
-
-   Replace any old comma-separated QR/QR2/QR_DEEP value.
-   Do not paste quotes around the value.
-   Use the dashboard's save/redeploy action.
-   Editing render.yaml alone might not update a manually created service.
-
-6. CHECK THE RENDER COMMANDS
-   Open the service's Settings. Use:
-
-   Build Command:
-   pip install -r requirements.txt && python -m unittest -q test_server.py
-
-   Start Command:
-   uvicorn server:app --host 0.0.0.0 --port $PORT
-
-   Health Check Path:
-   /api/health
-
-   Keep the existing Root Directory if server.py is already inside it.
-   Otherwise, leave Root Directory empty when the app is at the repo root.
-   Keep an existing supported Python 3.12 runtime; render.yaml specifies 3.12.8
-   for new Blueprint services. No frontend build command is needed.
-
-   The build runs the Python tests after installing Astropy, so the astronomy
-   tests that could not run in the editing workspace are checked on Render.
-
-7. DEPLOY
-   If auto-deploy is on, Render starts after your commit or merge.
-   Otherwise select Manual Deploy > Deploy latest commit.
-   Wait for the deploy to finish. Check the log if it fails.
-   If it says "No module named archive_client", upload archive_client.py.
-   If it cannot find test_server.py, upload that file beside server.py.
-
-8. REFRESH YOUR SITE
-   Visit https://skymotion-sk2p.onrender.com
-   Hard refresh: Ctrl+Shift+R on Windows/Linux, Cmd+Shift+R on Mac.
-   The homepage should show the black-and-gold SkyMotion interface.
-
-9. QUICK CHECK
+3. CONFIRM THE VERSION
    Open https://skymotion-sk2p.onrender.com/api/health
-   Look for version "2.0.1" and collections ["spherex_dr1"].
+   Look for version 2.0.2. Hard-refresh the app after it is deployed.
 
-   In the app, choose Barnard's Star, then Load SPHEREx exposures.
-   Its wider preset includes room for its large proper motion.
-   Try all five challenge targets; they may not all have usable exposures
-   in each detector/release. A valid empty result is different from an outage.
-   Try D1–D6 if a target has no D2 coverage.
-   After images load, use Play, Previous, Next, and the timeline slider.
-   Switch back to Sky atlas and try DSS, 2MASS, and WISE using the layer menu.
-   On a phone, use the menu at top right to open the target controls.
-   Use Exposure notes & Gaia below the image for compact-screen metadata.
+4. TRY A SEARCH
+   Choose a suggested target and select Load SPHEREx exposures.
+   If SIA fails, the app also tries IRSA TAP. A recovered sequence has a
+   compact notice; expand Archive connection details for its coverage limits.
+   If both services fail, use Retry archive after a short interval.
+   Try another detector when a successful search returns no exposures.
 
-   /api/archive starts as "unchecked" until a real search runs.
-   That is expected. It no longer sends speculative collection probes.
+The existing black-and-gold sky atlas and map fallback are preserved.
+The color reference atlas uses CDS survey services, independently of IRSA.
+A service outage can still prevent images; merging cannot repair an upstream
+IRSA/CDS outage. No simulated sky images are served to hide a failure.
 
-WHAT THE ORIGINAL JSON MEANT
-
-"live": ["spherex_dr1"] means DR1 answered. It is not a total app crash.
-The other collection requests returned upstream HTTP 502 errors.
-The old code probed historical/incorrect names as well as optional releases.
-QR3 is a documented collection, so its 502 does not prove it is invalid.
-This update starts with the responding DR1 collection, retries transient
-failures, and distinguishes service failures from a genuine empty result.
-It cannot prevent a real outage at NASA/IPAC or CDS.
-
-THE COLORS
-
-The atlas uses real telescope color composites from DSS, 2MASS, and WISE.
-These surveys supply the stars, nebulae, and galaxies; no decorative star
-field or AI-generated sky is substituted for observations.
-SPHEREx time-series frames are grayscale near-infrared science images.
-The app labels the two views separately.
-
-IF SOMETHING STILL DOES NOT LOAD
-
-- Old purple interface: check the deployed commit, then hard refresh.
-- Import/build error: confirm all files and requirements.txt were replaced.
-- Archive unavailable: use Retry archive after a short interval. A deployment
-  cannot force IRSA to be online. The map is independent of the SPHEREx API.
-- No matching exposures: try a different detector or target. No fake frames
-  are supplied to make an empty field look successful.
-- Sky map unavailable: after at most 8 seconds, the built-in atlas should
-  take over if Aladin cannot initialize. Open /?atlas=basic to skip Aladin.
-  Use Retry map to repeat a failed image request. Check the image URL in
-  MAP_FIX_README.txt; a JSON error there identifies an upstream service issue.
-- First request is slow: allow time for Render startup and archive responses.
-
-VALIDATION STATUS
-
-The editing workspace passed 30 Python API/archive tests, 10 React/htm
-state tests, 10 atlas geometry/lifecycle tests, and 4 loader integration tests. Three additional Astropy tests are included but could not run
-there because Astropy could not be installed. Browser rendering and direct
-requests to Render/IRSA/CDS were also restricted in that workspace.
-The build command runs all Python tests on Render after dependencies install.
-Complete the live checks above before presenting this as fully validated.
+See README.md for the API behavior and VALIDATION.txt for verification limits.
+The older MAP_FIX_README.txt describes the existing 2.0.1 map-loader repair.
