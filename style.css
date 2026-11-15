@@ -32,4 +32,16 @@
 /* A recovered search is usable; keep collection notices visually distinct from failures. */
 .notice-warning{color:#deceab;background:#1c1c14;border-color:#61563b}
 
+/* Keep archive notices in the sequence layout so they cannot cover a frame. */
+.sequence-mode .workspace{display:flex;flex-direction:column;padding:76px 24px 187px 365px}
+.sequence-mode .sequence-stage{position:relative;inset:auto;flex:1;min-height:0;container-type:size}
+.sequence-mode .notice{position:relative;inset:auto;order:-1;flex:none;margin-bottom:16px}
+.sequence-mode .frame-layout{width:min(100%,calc(100cqh - 90px));min-width:0;max-width:560px}
+.sequence-mode .survey-select{display:none}
+@media(min-width:1600px){.sequence-mode .workspace{padding-left:395px;padding-right:32px}}
+@media(max-height:820px) and (min-width:851px){.sequence-mode .workspace{padding-top:68px;padding-bottom:171px}}
+@media(max-width:1250px) and (min-width:851px){.sequence-mode .workspace{padding-left:324px;padding-right:18px}}
+@media(max-width:850px){.sequence-mode .workspace{padding:70px 22px 185px}.sequence-mode .frame-layout{width:min(100%,calc(100cqh - 96px))}}
+@media(max-width:560px){.sequence-mode .workspace{height:auto;min-height:calc(100dvh - 60px);padding-left:28px;padding-right:28px}.sequence-mode .sequence-stage{flex:none;height:max(360px,calc(100dvh - 410px))}.sequence-mode .frame-layout{width:min(100%,calc(100cqh - 112px));max-width:400px}.frame-caption{flex-wrap:wrap;gap:4px 10px}}
+
 .notice-copy{flex:1;min-width:0}.archive-details{font-size:10px;line-height:1.7;text-align:left;margin-top:8px;max-width:44em;color:var(--muted)}.archive-details summary{cursor:pointer;color:var(--gold)}.archive-details ul{padding-left:18px;margin:8px 0 0}.archive-details li+li{margin-top:6px}.notice .archive-details[open]{max-height:28vh;overflow:auto}.sequence-placeholder .archive-details{max-width:100%}

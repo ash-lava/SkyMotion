@@ -1,19 +1,22 @@
 # SkyMotion
 
-A map-first React sky explorer with a black and pale-gold interface, real color survey imagery, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** for updating your existing Render service from this repository.
+A React sky explorer with a black and pale-gold interface, live IRSA searches, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** to update the existing Render service.
 
-## Version 2.0.2: archive recovery
+## Version 2.0.3: bounded live IRSA search
 
-The current black-and-gold sky atlas, Aladin loader, local map fallback, and playback controls are retained.
+The supplied M101 CSV contains four valid IRSA exposure records. Live checks also found that small queries could succeed while larger queries failed at the proxy, and successful searches took about 21 seconds. This corrects the earlier diagnosis that treated the failures as a general archive outage.
 
-- If any SIA collection fails, SkyMotion also tries IRSA's documented TAP artifact/plane query. A successful TAP response can supply exposures even when every SIA request fails. A valid empty response stays distinct from an outage.
-- The fallback searches the field center and combines wide/deep products within the configured release families. SIA searches footprints intersecting the enclosing circle. The interface preserves that coverage caveat in expandable connection details. TAP is an alternative API path on IRSA infrastructure, not a guarantee against an IRSA-wide outage.
-- `/api/observations` reports `search_method` (`SIA2`, `TAP`, or `SIA2 + TAP`). `/api/archive` reports SIA collection outcomes separately from its `tap` result, including when TAP recovered a usable search while `live` is empty.
-- Failed responses use an actionable structured message; recovered searches get a compact gold notice instead of a failure state. The release badge reflects the returned images, and metadata downloads preserve search provenance.
-- Each changed artifact sequence gets a new search key. Refreshing the same field cannot silently replace frames used by an already loaded sequence. Partial snapshots remain readable but are searched again on the next load.
-- FITS links must be HTTPS science products on IRSA's SPHEREx path, without redirects, traversal, embedded credentials, query strings, or fragments. Required table columns are checked before calling a response healthy.
+- Search requests use CSV, a small circle around the requested center, and `MAXREC=16`, falling back to 4 records with bounded retries. A selected detector is sent as an upstream `BAND` filter before the row limit, so unrelated detector rows cannot exhaust the small response first.
+- SIA requests allow up to 45 seconds each, within an 80-second retry scheduling budget per collection. The previous 15-second timeout was shorter than the successful live responses. If SIA fails, the existing IRSA TAP alternative uses a detector/release-filtered query limited to 16 records.
+- The CSV parser handles IRSA's unquoted JSON `cloud_access` field and checks required columns and row alignment. HTML proxy pages, malformed rows, and VO errors remain failures; they cannot masquerade as empty coverage.
+- A bounded result is a **limited live sample**, not the full survey history. The API exposes `sampling_limited`, `total_lower_bound`, `query_limits`, and `queried_at`; the UI shows lower-bound counts and an explicit notice. Refresh archive bypasses the search cache.
+- The home page starts a live M101 search. All five challenge targets, arbitrary coordinates, detector selection, and cutout sizing remain available. Exact UTC exposure times distinguish frames taken on the same day.
+- The reference sky atlas opens on request. It uses independent CDS services and is not initialized during SPHEREx playback. A CDS outage therefore cannot add a map error to the default sequence view.
+- The earlier TAP recovery, immutable artifact-sequence keys, HTTPS science-product restrictions, partial-failure handling, and metadata provenance remain in place. Both search methods now find exposures covering the field center; cutout size controls the displayed field. TAP combines wide/deep products within configured release families and reports that caveat.
 
-No new package or Render environment variable is required. Keep `SPHEREX_COLLECTIONS=spherex_dr1` to preserve the current deployment's release choice. Merge the update into Render's connected branch, then deploy that commit. `/api/health` should report `2.0.2`.
+Runtime searches and FITS downloads use IRSA. No bundled observation listing, saved M101 sequence, AWS mosaic, synthetic sky, or offline fallback is served. The uploaded CSV is included only under `tests/fixtures/` for parser regression tests.
+
+No new package or Render environment variable is required. Keep `SPHEREX_COLLECTIONS=spherex_dr1`. After merging and deploying, `/api/health` should report `2.0.3`.
 
 ## Run locally
 
@@ -22,7 +25,7 @@ python -m pip install -r requirements.txt
 python -m uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000. Keep all supplied application files in the same directory. Do not open index.html as a local file. React 18 and htm are included; there is no npm build step. Aladin Lite v3 is attempted first. If its script, WebAssembly, or WebGL initialization fails or takes over 8 seconds, a local image-based atlas takes over. This fallback fetches real survey images through the Python API and needs no external browser script or WebGL. The Python server needs internet access to IRSA, CDS Sesame, and ESA Gaia for their respective features.
+Open http://localhost:8000. Keep all supplied application files in the same directory. Do not open index.html as a local file. React 18 and htm are included; there is no npm build step. When you open Sky atlas, Aladin Lite v3 is attempted first. If its script, WebAssembly, or WebGL initialization fails or takes over 8 seconds, a local image-based atlas takes over. This fallback fetches real survey images through the Python API and needs no external browser script or WebGL. The Python server needs internet access to IRSA for SPHEREx, CDS for the optional atlas and name lookup, and ESA Gaia for the optional overlay.
 
 ## Version 2.0.1 map-loader repair
 
@@ -65,12 +68,12 @@ Use Share patch, or construct a URL:
 https://YOUR-SITE/?ra=133.7951292&dec=-7.2451472&fov=12&band=D2&layer=wise&mode=sequence
 ```
 
-`ra` and `dec` use decimal ICRS degrees. `fov` is the SPHEREx cutout width in arcminutes: 1, 2, 3, 6, or 12. `band` selects D1–D6, not a single calibrated spectral channel. `layer` can be `dss`, `mass`, or `wise`. `mode=sequence` loads observations on arrival. Without it, the map opens without querying SPHEREx.
+`ra` and `dec` use decimal ICRS degrees. `fov` is the SPHEREx cutout width in arcminutes: 1, 2, 3, 6, or 12. `band` selects D1–D6, not a single calibrated spectral channel. `layer` can be `dss`, `mass`, or `wise`. `mode=sequence` loads observations on arrival. Shared coordinate URLs without it open the atlas. The bare home URL starts a live M101 sequence; `?mode=atlas` or `?atlas=basic` opens the optional atlas without an exposure search.
 
 ## Science and display limits
 
 - The colorful atlas is a telescope-band composite from a reference survey. It is not SPHEREx time-domain data and not necessarily visible-eye color. No synthetic sky or fake exposure is substituted for missing data.
-- The app selects at most 24 observations spread through returned observation times. The timeline slider steps by exposure index, not equal elapsed time. Upstream overflow is reported. Multiple releases can contain reprocessed versions of the same exposure; exact duplicate access URLs are removed, but distinct processing versions are not silently merged.
+- Each configured collection returns at most 16 records, or 4 after a smaller-query retry. TAP returns at most 16 records across release families. This can miss long time baselines or later observations; IRSA response order is not a complete survey inventory. When more than 24 records are returned across collections, the app selects at most 24 observations spread through those returned times. The timeline slider steps by exposure index, not equal elapsed time. Upstream overflow is reported. Multiple releases can contain reprocessed versions of the same exposure; exact duplicate access URLs are removed, but distinct processing versions are not silently merged.
 - Frames are geometrically aligned with bilinear interpolation. This is a quick-look display, not a flux-conserving reduction. Resampling adds no telescope resolution. There is no PSF matching, coaddition, calibrated subtraction, or discovery classifier.
 - Each frame is stretched independently at the 5th–99.5th percentile, followed by a square-root stretch. Apparent brightness changes can come from the stretch, wavelength, noise, PSF, contamination, or processing differences.
 - The same SPHEREx detector does not mean the same wavelength: its filter varies across the detector. Central wavelength is shown when the product supports it. Flag percentages count any nonzero flag in the displayed covered region; no scientific bit-mask policy is imposed.
@@ -88,7 +91,7 @@ node test_map_loader.cjs
 
 The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test DOM layout or Aladin itself.
 
-Validation of version 2.0.2: **44 Python tests passed with Astropy installed; 13 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map-loader tests passed.** Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
+Validation of version 2.0.3: **52 Python tests passed with Astropy installed; 16 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map-loader tests passed.** Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
 
 ## Data sources and documentation
 

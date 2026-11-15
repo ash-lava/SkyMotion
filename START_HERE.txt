@@ -1,43 +1,47 @@
-SKYMOTION 2.0.2 — UPDATE THE EXISTING RENDER SERVICE
+SKYMOTION 2.0.3 — DEPLOY THE LIVE IRSA SEARCH FIX
 
-The app is already in the GitHub repository connected to Render.
-There is no ZIP to upload and no new repository or Render service to create.
+The changes are in a pull request against the repository connected to Render.
+No new repository, service, API key, dependency, or environment variable is needed.
 
-1. REVIEW AND MERGE THE PULL REQUEST
-   Open the supplied pull-request link on GitHub.
-   Review the changes, then select Merge pull request > Confirm merge.
-   This updates main. The branch containing the proposed changes is separate
-   from main until you merge it.
+1. REVIEW AND MERGE
+   Open the supplied pull-request link and review the changes.
+   Select Merge pull request > Confirm merge to update main.
 
 2. DEPLOY THE MERGED COMMIT
-   If Render auto-deploy is on for main, it starts after the merge.
-   Otherwise open Render Dashboard > SkyMotion > Manual Deploy >
-   Deploy latest commit. Wait for the deployment to finish.
+   Render auto-deploy starts after the merge if enabled for main.
+   Otherwise use Render Dashboard > SkyMotion > Manual Deploy >
+   Deploy latest commit. Wait until deployment finishes.
 
    Existing commands remain:
    Build: pip install -r requirements.txt && python -m unittest -q test_server.py
    Start: uvicorn server:app --host 0.0.0.0 --port $PORT
    Health check: /api/health
 
-   Keep SPHEREX_COLLECTIONS=spherex_dr1 for the current release selection.
-   DR1 deep, QR3, and QR3 deep remain optional documented collections.
-   No new Python dependency, API key, or environment variable is needed.
+   Keep SPHEREX_COLLECTIONS=spherex_dr1.
+   Include tests/fixtures/sia-m101-four.csv in the checkout for the build tests.
+   That CSV is test input only; the application never uses it as search data.
 
 3. CONFIRM THE VERSION
    Open https://skymotion-sk2p.onrender.com/api/health
-   Look for version 2.0.2. Hard-refresh the app after it is deployed.
+   Look for version 2.0.3, then hard-refresh the app.
 
-4. TRY A SEARCH
-   Choose a suggested target and select Load SPHEREx exposures.
-   If SIA fails, the app also tries IRSA TAP. A recovered sequence has a
-   compact notice; expand Archive connection details for its coverage limits.
-   If both services fail, use Retry archive after a short interval.
-   Try another detector when a successful search returns no exposures.
+4. VERIFY LIVE SEARCH
+   The home page starts an IRSA exposure search for M101 automatically.
+   A search can take a minute or two. Step between frames or select Play.
+   Refresh archive forces a new IRSA request instead of reusing cached metadata.
 
-The existing black-and-gold sky atlas and map fallback are preserved.
-The color reference atlas uses CDS survey services, independently of IRSA.
-A service outage can still prevent images; merging cannot repair an upstream
-IRSA/CDS outage. No simulated sky images are served to hide a failure.
+   Choose WISE 0855 or enter other coordinates, then Load SPHEREx exposures.
+   The detector is filtered by IRSA before the response row limit is applied.
+   Use a different detector if a successful query has no matching exposures.
 
-See README.md for the API behavior and VALIDATION.txt for verification limits.
-The older MAP_FIX_README.txt describes the existing 2.0.1 map-loader repair.
+   Results are deliberately small live samples to reduce proxy failures.
+   Read the limited-sample notice and exact UTC times: four M101 exposures may
+   span only minutes, and the count is not the full number of survey exposures.
+   If IRSA still fails after retries, Retry archive later. Upstream failures
+   are intermittent; this update cannot guarantee every query will succeed.
+
+The black, pale-gold and white interface is retained. Sky atlas is optional
+and uses CDS services independently; it does not load during the default
+SPHEREx sequence. No saved sequence or mosaic replaces a live IRSA search.
+
+See README.md and VALIDATION.txt for behavior, test evidence and limits.

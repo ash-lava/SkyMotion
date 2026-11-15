@@ -1,75 +1,109 @@
-SkyMotion 2.0.2 — validation, 15 November 2026 (Asia/Dubai)
+SkyMotion 2.0.3 — validation, 15 November 2026 (UTC)
 
-The update was adapted to the existing map-first 2.0.1 application at
-base commit a6ea2045b6b8b4bd6ea29892f188e1df15272e57. It retains that app's
-black/gold interface, Aladin loader, local atlas, and SPHEREx playback.
+Base: c9a79194a1b2b56c9ca6a82f07693d078192d5b9, the merged 2.0.2 update.
+The black/gold interface is retained. The default view now searches IRSA
+for M101, with the independent CDS reference atlas available on request.
+
+DIAGNOSIS CORRECTION
+The user's SIA.csv is a successful IRSA response with four genuine records,
+not a proxy-error page. It contains D3 and D6 observations. IRSA emits
+unquoted JSON with commas in cloud_access; the parser repairs that declared
+field only after validating its JSON, preserving later CSV columns.
+
+Direct live checks found small CSV queries succeeding while larger ones
+failed at the proxy. Successful responses took about 21 seconds, longer than
+the old 15-second SIA timeout. Identical small requests could also alternate
+between success and 502. These facts support bounded requests, longer
+waiting, and retries; they do not establish a single proxy failure cause or
+a total archive outage. Detector filtering is now applied before MAXREC.
 
 AUTOMATED CHECKS
-44 Python unittest cases passed with the repository's astronomy dependencies
-installed, including Astropy 7.2.3, SciPy 1.17.0 and Pillow 12.3.0.
-13 React/htm state checks passed.
+52 Python unittest cases passed with repository dependencies installed,
+including Astropy 7.2.3, SciPy 1.17.0 and Pillow 12.3.0.
+16 React/htm state checks passed.
 10 atlas geometry/lifecycle checks passed.
 4 Aladin/fallback loader checks passed.
 JavaScript parsing and git whitespace checks passed.
 
-Run the repository suites:
+Run:
 python -m unittest -q test_server.py
 node test_frontend.cjs
 node test_sky_atlas.cjs
 node test_map_loader.cjs
 
-New regression checks cover TAP recovery when every SIA collection fails,
-partial-query merging and deduplication, healthy empty fallback results,
-separate TAP/SIA status, required table columns, release-family and detector
-filtering, immutable refreshed snapshots, partial-cache invalidation,
-restricted science-image URLs, readable structured errors, release labels,
-compact recovery notices, and retained provenance in metadata downloads.
+New regression checks cover the actual uploaded CSV, its cloud JSON column,
+valid empty CSV, malformed tables and HTML, smaller-query recovery, upstream
+detector filtering, limited-sample provenance, caching a limited result,
+refresh bypass, bounded TAP requests/CSV parsing, and the default live view.
+Earlier archive-failure, coordinate, WCS, playback, and cache tests remain.
+Fixtures live only in tests; runtime code never reads the supplied CSV.
 
-BROWSER CHECKS
-11 Chromium browser scenarios passed with no JavaScript runtime errors:
-- Atlas failure state and retry control.
-- Structured archive failure and retry.
-- TAP recovery with usable frames, real release labels, expandable notices.
-- Previous/next, slider, keyboard shortcuts and playback gating.
-- Gaia overlay rendering.
-- Metadata download containing search_method.
-- Data dialog and Escape dismissal.
+GENUINE LIVE SEARCH AND FRAME VERIFICATION
+Local backend: Python uvicorn, normal IRSA HTTPS endpoints, SPHEREX_COLLECTIONS
+spherex_dr1. No mocked responses or bundled observation list in these checks.
+
+1. Fresh API search for M101 (refresh=true):
+   RA 210.80227 deg, Dec +54.34895 deg, D2, field width 6 arcmin.
+   HTTP 200 in 23.3 seconds, four records through SIA2, MAXREC=4.
+   Observations 2025W19_2B_0346_1 through _4, 10 May 2025,
+   17:04:37.747200 to 17:11:04.560000 UTC.
+   First two PNG frame APIs returned HTTP 200, 192 x 192, in 4.17 and 3.49s.
+   Actual center wavelengths: about 1.506421 and 1.542886 micrometers.
+
+2. Fresh API search for WISE 0855:
+   RA 133.7951292 deg, Dec -7.2451472 deg, D2, field width 12 arcmin.
+   HTTP 200, 16 SIA2 records, MAXREC=16, including 6 May and 7 November 2025.
+   PNGs for 6 May and 7 November both returned HTTP 200, 192 x 192, in
+   3.73 and 3.15 seconds. This verifies a second coordinate field and actual
+   images across a multi-month span.
+
+3. Browser end to end, with CACHE_TTL=0:
+   The bare home page made a fresh backend/IRSA query, returning 16 genuine
+   M101 D2 records in 22.3 seconds, and 21.5 seconds on a repeat check.
+   Returned dates spanned 10–16 May 2025.
+   Actual first and second frame and frame-info endpoints returned HTTP 200.
+   The browser made no CDS atlas, /api/sky.jpg, or bundled /data/ request.
+   The committed docs/ screenshots show this live-search M101 sequence.
+
+Eight unmocked Chromium browser checks passed without JavaScript errors:
+- Fresh live search and actual observation metadata.
+- Actual FITS frame and wavelength without atlas/bundled requests.
+- Limited-sample notice, lower-bound count, exact UTC times.
+- A second actual FITS frame through the frame API.
+- Playback advancing between real frames.
+- Metadata export preserving queried_at and sample provenance.
 - No horizontal overflow at 320, 390, 768, 1024 and 1440 pixels.
-- Phone target-panel controls.
-- Empty fallback results with retained caveats and disabled playback.
-- Genuine SPHEREx FITS rendering, wavelength metadata and phone notes dialog.
+- Phone notes and target-panel controls.
 
-API fixtures exercised failures, multi-frame playback and overlay behavior.
-These fixtures are isolated to the test harness; the application never
-substitutes simulated observations. The screenshots in docs/ show a single
-actual SPHEREx QR3 exposure, not a successful multi-epoch archive search.
+Twelve additional layout checks passed using the genuine live metadata in
+the normal cache. At 320 x 640, 390 x 844, 768 x 900, 1024 x 768,
+1440 x 1000 and 1920 x 1080, both collapsed and expanded archive notices
+stay above the frame heading, and captions stay above the timeline.
+Dismissing the notice preserves the frame. Short phones can scroll rather
+than shrinking the frame into an overlapping layout.
 
-GENUINE IMAGE VERIFICATION
-A real IRSA cutout was downloaded and processed through the repository's
-actual image API:
-https://irsa.ipac.caltech.edu/ibe/data/spherex/qr3/level2/2026W21_2A/l2b-v27-2026-268/1/level2_2026W21_2A_0001_2D1_spx_l2b-v27-2026-268.fits
+LIMITS
+Live success is verified locally; it is not a claim that the deployed Render
+service has already changed. IRSA failures remain intermittent. All five
+challenge targets have not been verified end to end, and a successful live
+TAP response is not claimed in this session; TAP has regression coverage.
 
-Field: RA 337.8783221 deg, Dec -5.1891588 deg, width 3 arcmin.
-Observation: 21 May 2026; detector D1; center wavelength about 0.868817 um.
-For the screenshot/browser check, only the observation listing was supplied
-from this FITS file's real header because IRSA metadata services were failing.
-The displayed PNG and spectral metadata used the actual local backend.
-No generated cache or reference observation records are committed.
+Each SIA collection is limited to 16 records, or 4 after a smaller retry.
+TAP is limited to 16. Limited counts are lower bounds, and an incomplete
+sample may omit long time baselines. Four M101 exposures in the first test
+span only six minutes. The broader browser result spans six days. Neither
+is a complete M101 survey history.
 
-LIVE SERVICE LIMITS
-The deployed site's /api/health reported 2.0.1 before this pull request.
-The production site has not been changed or redeployed by this work.
-IRSA SIA/TAP requests returned upstream failures during checks; a complete
-live multi-exposure search and all five challenge targets are not claimed
-as verified. The TAP fallback has regression coverage with real VOTable
-parsing and the query documented by IRSA's spectral-image cutout tutorial.
+FITS images retain the existing science limits: independent stretches,
+varying center wavelengths, no PSF matching, and any-nonzero flag counts.
+The M101 frames report nearly 100% of covered pixels with some flag bit set;
+they are not represented as clean or calibrated variability measurements.
+Read the exposure notes before interpreting apparent motion or brightness.
 
-The CDS reference-survey endpoints were also unavailable in these checks
-(HTTP 404/503 on direct probes). Their failure behavior was exercised; a
-successful live color-atlas download is not claimed. Those services are
-independent of the SPHEREx FITS cutout and metadata endpoints.
+The CDS color atlas remains independent and optional. Its earlier live
+failures were not repaired or presented as a successful atlas check.
 
 DEPLOYMENT
-After reviewing and merging the pull request, let Render auto-deploy main or
-choose Manual Deploy > Deploy latest commit. /api/health should report 2.0.2.
-No environment-variable or dependency changes are needed.
+Merge the supplied pull request, then let Render auto-deploy main or use
+Manual Deploy > Deploy latest commit. /api/health should report 2.0.3.
+No dependency, secret, or environment-variable change is required.

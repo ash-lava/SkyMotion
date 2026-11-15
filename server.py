@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.2'
+VERSION = '2.0.3'
 app = FastAPI(title='SkyMotion', version=VERSION)
 from sky_service import router as sky_router
 app.include_router(sky_router)
@@ -108,7 +108,7 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
             pass
     diagnostics = {}
     try:
-        # SIA searches all image footprints intersecting the square field's enclosing circle.
+        # A bounded live search finds footprints covering the center; fov sets cutout width.
         rows, total, warnings, live, failed = archive.search(
             ra, dec, fov * math.sqrt(2) / 120, detector, limit, diagnostics=diagnostics)
     except archive.ArchiveError as exc:
@@ -125,10 +125,13 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
     payload = {'key': key, 'observations': rows, 'total': total, 'warnings': warnings,
                'source': 'NASA/IPAC IRSA SPHEREx', 'search_method': method, 'real': True,
                'ra': ra, 'dec': dec, 'fov_arcmin': fov, 'detector': detector,
-               'collections': live, 'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
+               'collections': live, 'sampling_limited': diagnostics.get('sampling_limited', False),
+               'total_lower_bound': bool(failed) or diagnostics.get('sampling_limited', False),
+               'query_limits': diagnostics.get('query_limits', {}), 'queried_at': time.time(),
+               'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
     write_cache(key, payload)
     ref = CACHE / f'{lookup_key}.ref'
-    if not warnings:
+    if not warnings or diagnostics.get('complete_search', False):
         temp = CACHE / f'{lookup_key}.{uuid.uuid4().hex}.tmp'
         try:
             temp.write_text(key)
