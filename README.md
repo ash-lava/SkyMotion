@@ -1,6 +1,19 @@
 # SkyMotion
 
-A map-first React sky explorer with a black and pale-gold interface, real color survey imagery, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** for uploading to an existing GitHub repository and redeploying on Render.
+A map-first React sky explorer with a black and pale-gold interface, real color survey imagery, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** for updating your existing Render service from this repository.
+
+## Version 2.0.2: archive recovery
+
+The current black-and-gold sky atlas, Aladin loader, local map fallback, and playback controls are retained.
+
+- If any SIA collection fails, SkyMotion also tries IRSA's documented TAP artifact/plane query. A successful TAP response can supply exposures even when every SIA request fails. A valid empty response stays distinct from an outage.
+- The fallback searches the field center and combines wide/deep products within the configured release families. SIA searches footprints intersecting the enclosing circle. The interface preserves that coverage caveat in expandable connection details. TAP is an alternative API path on IRSA infrastructure, not a guarantee against an IRSA-wide outage.
+- `/api/observations` reports `search_method` (`SIA2`, `TAP`, or `SIA2 + TAP`). `/api/archive` reports SIA collection outcomes separately from its `tap` result, including when TAP recovered a usable search while `live` is empty.
+- Failed responses use an actionable structured message; recovered searches get a compact gold notice instead of a failure state. The release badge reflects the returned images, and metadata downloads preserve search provenance.
+- Each changed artifact sequence gets a new search key. Refreshing the same field cannot silently replace frames used by an already loaded sequence. Partial snapshots remain readable but are searched again on the next load.
+- FITS links must be HTTPS science products on IRSA's SPHEREx path, without redirects, traversal, embedded credentials, query strings, or fragments. Required table columns are checked before calling a response healthy.
+
+No new package or Render environment variable is required. Keep `SPHEREX_COLLECTIONS=spherex_dr1` to preserve the current deployment's release choice. Merge the update into Render's connected branch, then deploy that commit. `/api/health` should report `2.0.2`.
 
 ## Run locally
 
@@ -75,7 +88,7 @@ node test_map_loader.cjs
 
 The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test DOM layout or Aladin itself.
 
-At handoff: **30 Python tests passed, 3 Astropy tests skipped, 10 frontend state tests passed, 10 atlas geometry/lifecycle tests passed, 4 map-loader integration tests passed**. Direct outbound requests to the deployed app/IRSA/CDS, package installation, and Chromium rendering were restricted in the editing workspace. Consequently, live FITS downloads, astronomy tests, and visual/browser integration are not claimed as verified. The supplied Render build command runs the full Python suite after dependency installation. Use START_HERE.txt's deployment checks for actual surveys and all five targets.
+Validation of version 2.0.2: **44 Python tests passed with Astropy installed; 13 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map-loader tests passed.** Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
 
 ## Data sources and documentation
 
@@ -93,7 +106,7 @@ At handoff: **30 Python tests passed, 3 Astropy tests skipped, 10 frontend state
 
 ## Credits and license
 
-Independent NASA Space Apps project; not an official NASA product. Code: MIT, preserving the supplied LICENSE. React and htm retain their embedded licenses. Aladin Lite is loaded from CDS and is not bundled or relicensed. Survey data retain their source terms and acknowledgments.
+Independent NASA Space Apps project; not an official NASA product. Code: MIT, preserving the supplied LICENSE. React and htm retain their licenses; see THIRD_PARTY_LICENSES.txt. Aladin Lite is loaded from CDS and is not bundled or relicensed. Survey data retain their source terms and acknowledgments.
 
 SPHEREx data: NASA / JPL / Caltech / IPAC. Reference atlas: DSS / STScI, 2MASS / UMass / IPAC, WISE / NASA / JPL / UCLA. Catalog overlay: ESA Gaia DR3. Viewer and name resolution: CDS Aladin / Sesame.
 

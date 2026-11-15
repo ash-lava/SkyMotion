@@ -1,0 +1,75 @@
+SkyMotion 2.0.2 — validation, 15 November 2026 (Asia/Dubai)
+
+The update was adapted to the existing map-first 2.0.1 application at
+base commit a6ea2045b6b8b4bd6ea29892f188e1df15272e57. It retains that app's
+black/gold interface, Aladin loader, local atlas, and SPHEREx playback.
+
+AUTOMATED CHECKS
+44 Python unittest cases passed with the repository's astronomy dependencies
+installed, including Astropy 7.2.3, SciPy 1.17.0 and Pillow 12.3.0.
+13 React/htm state checks passed.
+10 atlas geometry/lifecycle checks passed.
+4 Aladin/fallback loader checks passed.
+JavaScript parsing and git whitespace checks passed.
+
+Run the repository suites:
+python -m unittest -q test_server.py
+node test_frontend.cjs
+node test_sky_atlas.cjs
+node test_map_loader.cjs
+
+New regression checks cover TAP recovery when every SIA collection fails,
+partial-query merging and deduplication, healthy empty fallback results,
+separate TAP/SIA status, required table columns, release-family and detector
+filtering, immutable refreshed snapshots, partial-cache invalidation,
+restricted science-image URLs, readable structured errors, release labels,
+compact recovery notices, and retained provenance in metadata downloads.
+
+BROWSER CHECKS
+11 Chromium browser scenarios passed with no JavaScript runtime errors:
+- Atlas failure state and retry control.
+- Structured archive failure and retry.
+- TAP recovery with usable frames, real release labels, expandable notices.
+- Previous/next, slider, keyboard shortcuts and playback gating.
+- Gaia overlay rendering.
+- Metadata download containing search_method.
+- Data dialog and Escape dismissal.
+- No horizontal overflow at 320, 390, 768, 1024 and 1440 pixels.
+- Phone target-panel controls.
+- Empty fallback results with retained caveats and disabled playback.
+- Genuine SPHEREx FITS rendering, wavelength metadata and phone notes dialog.
+
+API fixtures exercised failures, multi-frame playback and overlay behavior.
+These fixtures are isolated to the test harness; the application never
+substitutes simulated observations. The screenshots in docs/ show a single
+actual SPHEREx QR3 exposure, not a successful multi-epoch archive search.
+
+GENUINE IMAGE VERIFICATION
+A real IRSA cutout was downloaded and processed through the repository's
+actual image API:
+https://irsa.ipac.caltech.edu/ibe/data/spherex/qr3/level2/2026W21_2A/l2b-v27-2026-268/1/level2_2026W21_2A_0001_2D1_spx_l2b-v27-2026-268.fits
+
+Field: RA 337.8783221 deg, Dec -5.1891588 deg, width 3 arcmin.
+Observation: 21 May 2026; detector D1; center wavelength about 0.868817 um.
+For the screenshot/browser check, only the observation listing was supplied
+from this FITS file's real header because IRSA metadata services were failing.
+The displayed PNG and spectral metadata used the actual local backend.
+No generated cache or reference observation records are committed.
+
+LIVE SERVICE LIMITS
+The deployed site's /api/health reported 2.0.1 before this pull request.
+The production site has not been changed or redeployed by this work.
+IRSA SIA/TAP requests returned upstream failures during checks; a complete
+live multi-exposure search and all five challenge targets are not claimed
+as verified. The TAP fallback has regression coverage with real VOTable
+parsing and the query documented by IRSA's spectral-image cutout tutorial.
+
+The CDS reference-survey endpoints were also unavailable in these checks
+(HTTP 404/503 on direct probes). Their failure behavior was exercised; a
+successful live color-atlas download is not claimed. Those services are
+independent of the SPHEREx FITS cutout and metadata endpoints.
+
+DEPLOYMENT
+After reviewing and merging the pull request, let Render auto-deploy main or
+choose Manual Deploy > Deploy latest commit. /api/health should report 2.0.2.
+No environment-variable or dependency changes are needed.

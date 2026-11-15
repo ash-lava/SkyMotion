@@ -34,10 +34,17 @@ const SURVEYS = {
 const DETECTORS = {D1:'0.75–1.1 µm',D2:'1.1–1.6 µm',D3:'1.6–2.4 µm',D4:'2.4–3.8 µm',D5:'3.8–4.4 µm',D6:'4.4–5.0 µm'};
 const date = d => d ? new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}) : 'Date unavailable';
 const coords = t => `${t.ra.toFixed(5)}°, ${t.dec >= 0 ? '+' : ''}${t.dec.toFixed(5)}°`;
+function errorMessage(payload, fallback) {
+  return typeof payload.detail === 'string' ? payload.detail : payload.detail?.message || fallback;
+}
+function archiveDetails(warnings) {
+  if (!warnings?.length) return null;
+  return html`<details className="archive-details"><summary>Archive connection details</summary><ul>${warnings.map((warning,k)=>html`<li key=${k}>${warning}</li>`)}</ul></details>`;
+}
 async function api(url, signal) {
   const response = await fetch(url, {signal});
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `Request failed (${response.status}). Please retry.`);
+  if (!response.ok) throw new Error(errorMessage(payload, `Request failed (${response.status}). Please retry.`));
   return payload;
 }
 function initialState() {
@@ -127,6 +134,7 @@ function App() {
   const [phot,setPhot]=useState(null),[measuring,setMeasuring]=useState(false),[photOpen,setPhotOpen]=useState(false),[notesOpen,setNotesOpen]=useState(false);
   const mapRef=useRef(null), searchRef=useRef(null), resolveRef=useRef(null), blobs=useRef(new Map()), photoRef=useRef(null);
   const obs=data?.observations || [], o=obs[index], frameMatches=frame?.index===index && frame?.key===data?.key;
+  const releases = [...new Set(obs.map(row=>row.collection.replace('spherex_', '').replace('_deep', '').toUpperCase()))];
   const selectedMoved = Math.abs(center.ra-target.ra)>.0001 || Math.abs(center.dec-target.dec)>.0001;
 
   function clearSequence() {
@@ -167,8 +175,8 @@ function App() {
       const d=await api('/api/observations?'+new URLSearchParams({ra:target.ra,dec:target.dec,fov,detector:band,limit:24,refresh}),controller.signal);
       if(controller.signal.aborted)return;
       setData(d);
-      if(!d.observations.length)setStatus({text:'No matching exposures in this release. Try another detector or sky patch.',empty:true});
-      else if(d.warnings.length)setStatus({text:d.warnings.join(' '),error:true});
+      if(!d.observations.length)setStatus({text:'No matching exposures were returned by the available search. Try another detector or sky patch.',empty:true,details:d.warnings});
+      else if(d.warnings.length)setStatus({text:d.search_method?.includes('TAP')?'An alternate IRSA search supplied these images. Some archive results may be missing.':'Some archive collections are unavailable. This sequence may be incomplete.',warning:true,details:d.warnings});
     } catch(err) {if(err.name!=='AbortError')setStatus({error:true,text:err.message});}
     finally {if(searchRef.current===controller)setBusy(false);}
   }
@@ -182,7 +190,7 @@ function App() {
         let url=blobs.current.get(identity);
         if(!url) {
           const response=await fetch(`/api/frame/${identity}.png`,{signal:controller.signal,cache:'no-store'});
-          if(!response.ok){const d=await response.json().catch(()=>({}));throw Error(d.detail||'This exposure could not be loaded.');}
+          if(!response.ok){const d=await response.json().catch(()=>({}));throw Error(errorMessage(d,'This exposure could not be loaded.'));}
           const blob=await response.blob();if(controller.signal.aborted)return;
           url=URL.createObjectURL(blob);blobs.current.set(identity,url);
         }
@@ -224,13 +232,13 @@ function App() {
     try{const d=await api(`/api/photometry/${data.key}?max_frames=12`,controller.signal);if(!controller.signal.aborted)setPhot(d);}
     catch(e){if(e.name!=='AbortError')setPhot({error:e.message});}finally{if(photoRef.current===controller)setMeasuring(false);}
   }
-  function downloadMetadata(){const rows=obs.map(({id,date,band,collection,em_min,em_max,exptime})=>({id,date,band,collection,em_min,em_max,exptime}));const blob=new Blob([JSON.stringify({target,fov_arcmin:fov,observations:rows},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='skymotion-observations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+  function downloadMetadata(){const rows=obs.map(({id,date,band,collection,em_min,em_max,exptime})=>({id,date,band,collection,em_min,em_max,exptime}));const blob=new Blob([JSON.stringify({target,fov_arcmin:fov,search_method:data.search_method||'SIA2',observations:rows},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='skymotion-observations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 
   return html`<div className=${`app ${mode==='sequence'?'sequence-mode':''}`}>
     <header className="topbar">
       <a className="brand" href="/" aria-label="SkyMotion home"><span className="brand-mark"><${Icon} name="star" size=${25}/></span><span>SkyMotion<span className="brand-period">.</span></span></a>
       <span className="topbar-note">THE SKY, OVER TIME</span>
-      <div className="topbar-right"><span className="archive-badge"><span className=${`status-dot ${status?.error?'warning':''}`}></span>SPHEREx <span className="muted">/ DR1</span></span>
+      <div className="topbar-right"><span className="archive-badge"><span className=${`status-dot ${status?.error?'warning':''}`}></span>SPHEREx <span className="muted">/ ${releases.length ? releases.join(' + ') : 'IRSA'}</span></span>
       <button className="text-button about-button" onClick=${()=>setAbout(true)}><${Icon} name="info" size=${16}/> About the data</button>
       <button className="share-button" onClick=${share}><${Icon} name="share" size=${15}/> Share patch</button>
       <button className="icon-button mobile-menu" aria-label="Toggle search panel" aria-expanded=${panel} onClick=${()=>setPanel(v=>!v)}><${Icon} name=${panel?'cross':'menu'}/></button></div>
@@ -267,7 +275,7 @@ function App() {
             ${frameError?html`<div className="frame-error" role="alert"><${Icon} name="info" size=${24}/><p>${frameError}</p><button className="subtle-button" onClick=${()=>{blobs.current.delete(`${data.key}/${index}`);setRetry(v=>v+1);}}>Retry frame</button><button className="text-button" onClick=${()=>move(1)} disabled=${obs.length<2}>Skip to next exposure</button></div>`:null}
           </div>
           <div className="frame-caption"><span>${date(o.date)} <span className="muted">UTC</span></span><span>North up · same sky grid</span></div><button className="mobile-notes text-button" onClick=${()=>{setPlaying(false);setNotesOpen(true);}}>Exposure notes & Gaia <${Icon} name="info" size=${13}/></button>
-        </div>`:html`<div className="sequence-placeholder"><${Icon} name="layers" size=${30}/><span className="eyebrow">A DIFFERENT VIEW OF TIME</span><h2>${status?.empty?'No exposures in this patch.':status?.error?'The archive couldn’t connect.':'See what changes.'}</h2><p>${status?.text||'Load infrared exposures of your selected patch, then step through them or press play.'}</p><button className="primary-button" onClick=${()=>loadExposures(true)}>${status?.error?'Retry archive':'Load SPHEREx exposures'}<${Icon} name="arrow" size=${17}/></button><button className="text-button" onClick=${()=>setMode('atlas')}>Return to sky atlas</button></div>`}
+        </div>`:html`<div className="sequence-placeholder"><${Icon} name="layers" size=${30}/><span className="eyebrow">A DIFFERENT VIEW OF TIME</span><h2>${status?.empty?'No exposures in this patch.':status?.error?'The archive couldn’t connect.':'See what changes.'}</h2><p>${status?.text||'Load infrared exposures of your selected patch, then step through them or press play.'}</p>${archiveDetails(status?.details)}<button className="primary-button" onClick=${()=>loadExposures(true)}>${status?.error?'Retry archive':'Load SPHEREx exposures'}<${Icon} name="arrow" size=${17}/></button><button className="text-button" onClick=${()=>setMode('atlas')}>Return to sky atlas</button></div>`}
         ${obs.length?html`<aside className="exposure-info panel"><span className="eyebrow">EXPOSURE NOTES</span><dl><dt>Observed</dt><dd>${date(o.date)}</dd><dt>Detector</dt><dd>${band} <span>${DETECTORS[band]}</span></dd><dt>Wavelength at center</dt><dd>${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'Not available'}</dd><dt>Release</dt><dd>${o.collection.replace('spherex_','').toUpperCase()}</dd><dt>Flagged pixels</dt><dd>${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'Not available'}</dd><dt>Patch covered</dt><dd>${info?`${(info.coverage*100).toFixed(0)}%`:'…'}</dd></dl>
           <label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>
           ${gaiaError?html`<p className="inline-warning">${gaiaError}</p>`:null}
@@ -275,7 +283,7 @@ function App() {
           <button className="text-button" onClick=${measure}>Brightness proxy <${Icon} name="arrow" size=${14}/></button><button className="text-button" onClick=${downloadMetadata}>Save metadata <${Icon} name="download" size=${14}/></button>
         </aside>`:null}
       </section>`:null}
-      ${status && (mode==='atlas'||obs.length>0)?html`<div className=${`notice ${status.error?'notice-error':''}`} role="status"><${Icon} name="info" size=${17}/><span>${status.text}</span><button aria-label="Dismiss message" onClick=${()=>setStatus(null)}><${Icon} name="cross" size=${15}/></button></div>`:null}
+      ${status && (mode==='atlas'||obs.length>0)?html`<div className=${`notice ${status.error?'notice-error':status.warning?'notice-warning':''}`} role="status"><${Icon} name="info" size=${17}/><div className="notice-copy"><span>${status.text}</span>${archiveDetails(status.details)}</div><button aria-label="Dismiss message" onClick=${()=>setStatus(null)}><${Icon} name="cross" size=${15}/></button></div>`:null}
       <section className="timeline panel" aria-label="Observation playback">
         <div className="timeline-header"><span className="eyebrow"><span className="tiny-star">+</span> OBSERVATION TIMELINE</span><span className="timeline-count">${obs.length?`${obs.length} of ${data.total} exposures · ${band}`:'SPHEREx · near-infrared'}</span></div>
         <div className="timeline-main"><div className="play-controls"><button className="icon-button" aria-label="Previous exposure" disabled=${!obs.length} onClick=${()=>{setMode('sequence');move(-1);}}><${Icon} name="back" size=${17}/></button><button className="play-button" aria-label=${playing?'Pause playback':'Play observations'} disabled=${obs.length<2||!!frameError} onClick=${()=>{setMode('sequence');setPlaying(v=>!v);}}><${Icon} name=${playing?'pause':'play'} size=${20}/></button><button className="icon-button" aria-label="Next exposure" disabled=${!obs.length} onClick=${()=>{setMode('sequence');move(1);}}><${Icon} name="next" size=${17}/></button></div>

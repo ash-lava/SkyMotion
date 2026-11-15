@@ -28,3 +28,8 @@
 .native-sky-reticle:before{width:1px;height:7px;left:12px;top:9px}.native-sky-reticle:after{width:7px;height:1px;left:9px;top:12px}
 .native-sky-badge{position:absolute;right:10px;bottom:10px;font:8px var(--sans);color:#c5bda5;background:#080909cc;padding:4px 7px;border-radius:3px;pointer-events:none}
 .native-pending .native-sky-image{opacity:.45}
+
+/* A recovered search is usable; keep collection notices visually distinct from failures. */
+.notice-warning{color:#deceab;background:#1c1c14;border-color:#61563b}
+
+.notice-copy{flex:1;min-width:0}.archive-details{font-size:10px;line-height:1.7;text-align:left;margin-top:8px;max-width:44em;color:var(--muted)}.archive-details summary{cursor:pointer;color:var(--gold)}.archive-details ul{padding-left:18px;margin:8px 0 0}.archive-details li+li{margin-top:6px}.notice .archive-details[open]{max-height:28vh;overflow:auto}.sequence-placeholder .archive-details{max-width:100%}
