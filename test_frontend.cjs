@@ -61,5 +61,33 @@ function normal(url){if(url.startsWith('/api/observations'))return response(sequ
  await test('Default page starts a live M101 search without a saved sample',async()=>{const ui=setup();await ui.settle();assert.ok(ui.calls.some(u=>u.startsWith('/api/observations?')&&u.includes('ra=210.80227')&&u.includes('dec=54.34895')));assert.ok(!ui.calls.some(u=>u.includes('/data/')));ui.cleanup();});
  await test('Atlas remains an explicit optional mode',async()=>{const ui=setup('?mode=atlas');await ui.settle();assert.ok(!ui.calls.some(u=>u.startsWith('/api/observations?')));ui.cleanup();});
  await test('Limited live samples disclose the lower-bound count and scope',async()=>{const ui=setup('?mode=atlas');ui.setResponder(url=>url.startsWith('/api/observations')?response({...sequence(),sampling_limited:true,total_lower_bound:true,warnings:['Live request reached MAXREC.']}):normal(url));await ui.click('Load SPHEREx exposures');assert.match(ui.text(),/3 of at least 3 exposures/);assert.match(ui.text(),/limited live IRSA sample/);ui.cleanup();});
+ await test('Atlas URLs restore a map view independently of the selected SPHEREx target',async()=>{
+  const ui=setup('?mode=atlas&ra=210.8&dec=54.3&atlas_ra=359.99&atlas_dec=-80&atlas_fov=180');
+  const map=ui.nodes().find(n=>n.type?.name==='SkyMap');assert.equal(map.props.view.ra,359.99);assert.equal(map.props.view.dec,-80);assert.equal(map.props.view.fov,180);assert.equal(map.props.target.ra,210.8);ui.cleanup();
+ });
+ await test('Changing a suggested target preserves the atlas zoom',async()=>{
+  const ui=setup('?mode=atlas');ui.nodes().find(n=>n.type?.name==='SkyMap').props.onCenter({ra:2,dec:3,fov:120});await ui.settle();
+  ui.nodes().find(n=>n.props.className?.startsWith('target-row')&&JSON.stringify(n.props.children).includes('Barnard')).props.onClick();await ui.settle();
+  const map=ui.nodes().find(n=>n.type?.name==='SkyMap');assert.equal(map.props.view.fov,120);assert.equal(map.props.target.ra,269.4521);ui.cleanup();
+ });
+ await test('Sharing a freely panned atlas retains its center and zoom',async()=>{
+  const ui=setup('?mode=atlas');ui.nodes().find(n=>n.type?.name==='SkyMap').props.onCenter({ra:.25,dec:-42,fov:3});await ui.settle();await ui.nodes().find(n=>n.props.className==='share-button').props.onClick();await ui.settle();
+  const p=new URL(ui.context.location.href).searchParams;assert.equal(p.get('atlas_ra'),'0.25');assert.equal(p.get('atlas_dec'),'-42');assert.equal(p.get('atlas_fov'),'3');assert.equal(p.get('ra'),'210.80227');ui.cleanup();
+ });
+ await test('Any valid coordinate pair opens the atlas without an exposure query',async()=>{
+  const ui=setup('?mode=atlas');ui.nodes().find(n=>n.type==='button'&&JSON.stringify(n.props.children).includes('SPHEREx sequence')).props.onClick();await ui.settle();
+  await ui.change('Right ascension in degrees','12.345');await ui.change('Declination in degrees','-90');
+  ui.nodes().find(n=>n.type==='form'&&n.props.onSubmit?.name==='applyCoordinates').props.onSubmit({preventDefault(){}});await ui.settle();
+  const map=ui.nodes().find(n=>n.type?.name==='SkyMap');assert.equal(map.props.target.ra,12.345);assert.equal(map.props.target.dec,-90);assert.equal(map.props.view.fov,6);assert.ok(!ui.calls.some(u=>u.startsWith('/api/observations?')));ui.cleanup();
+ });
+ await test('Selecting a panned position preserves its surrounding map field',async()=>{
+  const ui=setup('?mode=atlas');ui.nodes().find(n=>n.type?.name==='SkyMap').props.onCenter({ra:45.6,dec:12.3,fov:120});await ui.settle();
+  ui.nodes().find(n=>n.props.className==='search-area').props.onClick();await ui.settle();
+  const map=ui.nodes().find(n=>n.type?.name==='SkyMap');assert.equal(map.props.target.ra,45.6);assert.equal(map.props.view.fov,120);ui.cleanup();
+ });
+ await test('An all-sky atlas view does not enlarge the SPHEREx science cutout',async()=>{
+  const ui=setup('?mode=atlas&atlas_fov=360');ui.setResponder(normal);await ui.click('Load SPHEREx exposures');
+  const call=ui.calls.find(u=>u.startsWith('/api/observations?'));assert.equal(new URL(call,'https://example.test').searchParams.get('fov'),'6');ui.cleanup();
+ });
  console.log(`${passed} frontend state tests passed (no browser rendering).`);
 })().catch(err=>{console.error(err);process.exitCode=1;});

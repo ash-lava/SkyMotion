@@ -72,7 +72,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.4');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.5');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -147,7 +147,7 @@ class SkyServiceTests(unittest.TestCase):
         self.assertEqual(render.call_count,3)
     def test_bad_parameters_do_not_contact_upstream(self):
         with patch.object(self.sky.hips_survey,'render_survey') as render:
-            for suffix in ('ra=360&dec=0','ra=1&dec=99','ra=1&dec=0&width=10000','ra=1&dec=0&fov=180'):
+            for suffix in ('ra=360&dec=0','ra=1&dec=99','ra=1&dec=0&width=10000','ra=1&dec=0&fov=361'):
                 self.assertEqual(self.client.get('/api/sky.jpg?'+suffix).status_code,422)
             self.assertEqual(self.client.get('/api/sky.jpg?ra=1&dec=0&survey=https://example.com').status_code,400)
             render.assert_not_called()
@@ -157,9 +157,20 @@ class SkyServiceTests(unittest.TestCase):
         self.assertEqual(wcs['CRPIX1'],500.5);self.assertEqual(wcs['CRPIX2'],250.5)
         self.assertEqual(wcs['CRVAL1'],359.9);self.assertLess(wcs['CDELT1'],0);self.assertGreater(wcs['CDELT2'],0)
         self.assertAlmostEqual(math.degrees(2*math.atan(math.radians(wcs['CDELT2'])*1000/2)),10)
+        from astropy.wcs import WCS
+        north=WCS(self.sky.image_wcs(0,90,3,900,500))
+        lon,lat=north.pixel_to_world_values(500,249.5)
+        self.assertAlmostEqual(float(lon),270);self.assertAlmostEqual(float(lat),89.83162868,places=7)
     def test_local_atlas_script_is_served(self):
         result=self.client.get('/static/sky-atlas.js');self.assertEqual(result.status_code,200)
         self.assertIn('pixelToSky',result.text)
+    def test_full_sky_endpoint_accepts_arbitrary_center_and_uses_aitoff(self):
+        with patch.object(self.sky.hips_survey,'render_survey',return_value=self.jpeg) as render:
+            response=self.client.get('/api/sky.jpg?ra=12.345&dec=-90&fov=360&width=64&height=64')
+        self.assertEqual(response.status_code,200);self.assertIn('AIT',response.headers['x-sky-projection'])
+        spec=render.call_args.args[0]
+        self.assertEqual(spec['CRVAL1'],12.345);self.assertEqual(spec['CRVAL2'],-90)
+        self.assertEqual(spec['CTYPE1'],'RA---AIT')
 
 class HiPSSurveyTests(unittest.TestCase):
     def setUp(self):
@@ -231,6 +242,33 @@ class HiPSSurveyTests(unittest.TestCase):
         self.assertEqual(len(address.call_args_list),2)
         self.assertEqual(address.call_args_list[0].args[3]-address.call_args_list[1].args[3],1)
         self.assertEqual(fetch.call_count,1);self.assertTrue(raw.startswith(b'\xff\xd8'))
+    def test_all_sky_coordinates_match_independent_astropy_wcs(self):
+        from astropy.wcs import WCS
+        from sky_service import image_wcs
+        xx=np.array([450.,520.,300.,600.]);yy=np.array([250.,290.,200.,300.])
+        for dec in (-89.99,-30,0,54,89.99):
+            w=WCS(image_wcs(359.99,dec,360,900,500))
+            lon,lat=self.hips.aitoff_world(xx,yy,900,500,w)
+            expected_ra,expected_dec=w.pixel_to_world_values(xx,499-yy)
+            np.testing.assert_allclose((lon-expected_ra+180)%360-180,0,atol=1e-7)
+            np.testing.assert_allclose(lat,expected_dec,atol=1e-7)
+    def test_full_sky_masks_outside_ellipse_and_accepts_exact_poles(self):
+        from astropy.wcs import WCS
+        from sky_service import image_wcs
+        for dec in (-90,90):
+            w=WCS(image_wcs(123,dec,360,101,51))
+            lon,lat=self.hips.aitoff_world(np.array([0,50]),np.array([0,25]),101,51,w)
+            self.assertTrue(np.isnan(lon[0]));self.assertTrue(np.isnan(lat[0]))
+            self.assertAlmostEqual(lat[1],dec)
+            grid=self.hips.address_grid(w,101,51,0)
+            self.assertEqual(grid[0,0],-1);self.assertGreaterEqual(grid[25,50],0)
+    def test_full_sky_background_is_blank_outside_the_projection(self):
+        from sky_service import image_wcs
+        tile=np.full((512,512,3),200,dtype=np.uint8)
+        with patch.object(self.hips,'get_tile',return_value=tile):
+            raw=self.hips.render_survey(image_wcs(0,0,360,100,60),'dss')
+        image=np.asarray(Image.open(io.BytesIO(raw)))
+        self.assertTrue(np.all(image[0,0]<10));self.assertTrue(np.all(image[30,50]>180))
 
 @unittest.skipUnless(importlib.util.find_spec('astropy'),'Astropy is not installed in this test environment')
 class AstronomyTests(unittest.TestCase):

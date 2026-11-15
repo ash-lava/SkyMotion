@@ -2,7 +2,8 @@
 
 HiPS uses nested HEALPix addressing. In JPEG tiles, the even address bits
 select the row and the odd bits select the column (IVOA HiPS 1.0, section 4.2).
-The output WCS is supplied by sky_service: north up, east left, ICRS TAN.
+Output geometry is local ICRS TAN or wide Hammer-Aitoff, with north up
+at the view center and east left.
 """
 import io
 import math
@@ -72,14 +73,35 @@ def get_tile(survey, order, index):
     return pixels
 
 
+def aitoff_world(x, y, width, height, wcs):
+    """Inverse Hammer-Aitoff plus sky rotation, including exact celestial poles."""
+    px = -(x - (width - 1) / 2) * abs(wcs.wcs.cdelt[0]) * np.pi / 180
+    py = ((height - 1) / 2 - y) * abs(wcs.wcs.cdelt[1]) * np.pi / 180
+    valid = px * px / 8 + py * py / 2 <= 1 + 1e-12
+    z = np.sqrt(np.maximum(0, 1 - (px / 4) ** 2 - (py / 2) ** 2))
+    lon = 2 * np.arctan2(z * px, 2 * (2 * z * z - 1))
+    lat = np.arcsin(np.clip(z * py, -1, 1))
+    dec0 = np.radians(wcs.wcs.crval[1])
+    a, b, c = np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)
+    ra = (wcs.wcs.crval[0] + np.degrees(np.arctan2(b, np.cos(dec0) * a - np.sin(dec0) * c))) % 360
+    dec = np.degrees(np.arcsin(np.clip(np.sin(dec0) * a + np.cos(dec0) * c, -1, 1)))
+    return np.where(valid, ra, np.nan), np.where(valid, dec, np.nan)
+
+
 def address_grid(wcs, width, height, order):
     # Work in strips: avoid multiple full-size floating-point coordinate grids.
     addresses = np.empty((height, width), dtype=np.int64)
     for start in range(0, height, 64):
         stop = min(start + 64, height)
         yy, xx = np.indices((stop - start, width))
-        lon, lat = wcs.pixel_to_world_values(xx, height - 1 - (yy + start))
-        addresses[start:stop] = pixel_addresses(lon, lat, order)
+        if wcs.wcs.ctype[0] == 'RA---AIT':
+            lon, lat = aitoff_world(xx, yy + start, width, height, wcs)
+        else:
+            lon, lat = wcs.pixel_to_world_values(xx, height - 1 - (yy + start))
+        valid = np.isfinite(lon) & np.isfinite(lat)
+        strip = np.full(lon.shape, -1, dtype=np.int64)
+        strip[valid] = pixel_addresses(lon[valid], lat[valid], order)
+        addresses[start:stop] = strip
     return addresses
 
 
@@ -93,13 +115,13 @@ def render_survey(spec, survey):
             58.6323 / (TILE_WIDTH * abs(spec['CDELT1']))))))
         while True:
             addresses = address_grid(wcs, width, height, order)
-            ids = np.unique(addresses >> 18)
+            ids = np.unique(addresses[addresses >= 0] >> 18)
             if len(ids) <= MAX_TILES or order == 0:
                 break
             order -= 1
         with ThreadPoolExecutor(max_workers=4) as pool:
             tiles = list(pool.map(lambda index: get_tile(survey, order, int(index)), ids))
-        output = np.empty((height, width, 3), dtype=np.uint8)
+        output = np.zeros((height, width, 3), dtype=np.uint8)
         regions = addresses >> 18
         for index, tile in zip(ids, tiles):
             mask = regions == index
