@@ -1,4 +1,4 @@
-/* A small real-image atlas used if Aladin/WebGL cannot initialize.
+/* A small real-image atlas using the server’s live IRSA survey-tile renderer.
    Geometry exactly matches the TAN WCS in sky_service.py. No external scripts. */
 (function (global) {
   'use strict';
@@ -31,7 +31,7 @@
       this.image.className='native-sky-image';element.appendChild(this.image);
       this.canvas=document.createElement('canvas');this.canvas.className='native-sky-grid';element.appendChild(this.canvas);
       this.reticle=document.createElement('span');this.reticle.className='native-sky-reticle';this.reticle.setAttribute('aria-hidden','true');element.appendChild(this.reticle);
-      this.badge=document.createElement('span');this.badge.className='native-sky-badge';this.badge.textContent='CDS survey image · drag to pan';element.appendChild(this.badge);
+      this.badge=document.createElement('span');this.badge.className='native-sky-badge';this.badge.textContent='IRSA survey image · drag to pan';element.appendChild(this.badge);
       this.bound={pointerdown:e=>this.down(e),pointermove:e=>this.move(e),pointerup:e=>this.up(e),pointercancel:e=>this.up(e),wheel:e=>this.wheel(e),keydown:e=>this.key(e)};
       Object.entries(this.bound).forEach(([name,handler])=>element.addEventListener(name,handler,{passive:false}));
       this.resize=new ResizeObserver(()=>{this.drawGrid();this.schedule();});this.resize.observe(element);
@@ -59,7 +59,7 @@
         const previous=this.url;this.url=url;this.image.src=url;this.image.style.transform='';
         this.image.style.opacity='1';this.element.classList.remove('native-pending');
         if(previous)URL.revokeObjectURL(previous);
-        this.shown={...wanted,survey};this.badge.textContent='CDS survey image · drag to pan';
+        this.shown={...wanted,survey};this.badge.textContent='IRSA survey image · drag to pan';
         this.drawGrid();this.emit('ready');
       }catch(error){if(error.name!=='AbortError'&&!controller.signal.aborted&&!this.destroyed){this.image.style.opacity='.15';this.badge.textContent='Survey image unavailable';this.emit('error',error);}}
     }

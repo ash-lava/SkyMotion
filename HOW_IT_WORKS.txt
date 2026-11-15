@@ -1,0 +1,287 @@
+SKYMOTION: A BEGINNER'S GUIDE
+Applies to version 2.0.4
+
+You have built a website that runs in more than one place. Understanding
+which part is doing a job makes its error messages much less mysterious.
+
+1. THE FOUR PARTS
+
+Your browser is the front end: the part people see and interact with.
+HTML gives the page its structure, CSS gives it the black/gold appearance,
+and JavaScript responds to buttons, moves the map and plays observations.
+React helps the JavaScript keep the displayed page in step with the current
+selection. htm lets the app describe its interface without a separate build.
+
+The Python program on Render is the back end. It receives requests, talks
+to astronomy services, processes their data and sends results to the browser.
+FastAPI is the Python framework that connects each URL to a function.
+Uvicorn is the server program that accepts the incoming web connections.
+Render is the company hosting that running program on an internet computer.
+
+The astronomy archives are external services. IRSA holds the SPHEREx images
+and also hosts the reference-survey tiles used by the atlas. CDS Sesame
+provides optional object-name lookup. ESA Gaia provides optional catalog data.
+These organizations run separate systems outside your control.
+
+GitHub stores your source code and its history. A repository is the project
+folder stored on GitHub. GitHub stores the recipe; Render runs the recipe.
+Editing GitHub does not instantly alter a Python program already running.
+Render must build and deploy the updated code first.
+
+The usual request chain is:
+
+  Browser  -->  your Python app on Render  -->  astronomy archive
+  Browser  <--  an image or data response  <--  archive response
+
+An API is simply a defined way for one program to ask another program for
+something. For example, /api/sky.jpg asks your server for a map image.
+A request is the question; a response is the answer.
+
+2. WHY THE ATLAS AND SPHEREX CAN WORK OR FAIL SEPARATELY
+
+Sky atlas is a reference map. Its DSS, 2MASS and WISE layers come from older
+surveys of the sky. Their colors combine different telescope bands. They
+are not a live camera feed and are not a SPHEREx movie.
+
+SPHEREx sequence is a set of individually dated infrared observations.
+Playing them one after another can help people notice movement or changes.
+They look different from the colorful atlas because the instruments,
+wavelengths, image processing and observation times differ.
+
+Before 2.0.4, the atlas tried a CDS-hosted Aladin map script, followed by two
+CDS image services if that script or the browser's graphics support failed.
+In the reported deployment, the main image address returned HTTP 404 and
+the backup could not be reached. The map-script address also returned 404.
+A 404 identifies an unavailable address at the time of the request; it does
+not tell us that every CDS service is unavailable or that it is permanent.
+
+SPHEREx was using IRSA through different requests. Fixing those searches
+in 2.0.3 therefore did not repair the atlas addresses.
+
+Version 2.0.4 uses the built-in map and IRSA's public survey mirror for the
+atlas. It retains the separate live SPHEREx search. Both now use IRSA, but
+one working request still cannot prove that every other IRSA resource works.
+
+3. WHAT HAPPENS WHEN YOU OPEN THE ATLAS
+
+The browser knows a center position, a field size, a survey and the size of
+the map on your screen. It sends those values to /api/sky.jpg on your site.
+
+The server finds the required pieces of the selected sky survey. These
+pieces are called tiles, much like the small map sections a street-map
+website loads when you pan. HiPS is the astronomy standard describing how
+the tiles are arranged at several levels of detail. HEALPix is the system
+that divides the sphere of the sky into addressable areas.
+
+The server downloads the necessary real tiles from IRSA. Astropy HEALPix
+helps it find which survey pixel belongs at each location in the requested
+view. It projects those pixels into a rectangular image with north at the
+top and east on the left, then sends a JPEG to the browser.
+
+This is geometric image processing, not AI image generation. The pixels
+come from actual surveys. Processing does not add telescope resolution.
+The renderer uses nearest-pixel sampling for this reference display.
+
+Dragging changes the coordinates; zooming changes the field width. The
+browser requests a new image after navigation. It can temporarily move or
+scale the current image while waiting. The coordinate grid uses the same
+sky projection as the image.
+
+The code limits each view to 12 tiles, requesting at most four at a time.
+If a view needs too many tiles at one detail level, it uses a coarser level.
+The largest displayed field dimension is limited to 60 degrees. Those limits
+help keep memory and network work manageable on a small Render instance.
+
+4. WHAT HAPPENS WHEN YOU LOAD SPHEREX EXPOSURES
+
+First, the browser calls /api/observations with the selected position,
+detector and cutout size. The server searches IRSA for matching exposures.
+SIA2 is an astronomical image-search interface. TAP is an alternative
+interface that accepts database-style queries. Both connect to IRSA; they
+are alternative request paths, not independently operated archives.
+
+The first answer is metadata: a list describing images, their identifiers,
+observation times, detectors and download locations. Metadata means data
+about the images. This list is not the image pixels themselves.
+
+The server asks for CSV, a text-table format. The earlier uploaded SIA.csv
+contains valid IRSA records. A field containing unquoted JSON required a
+specific parser repair, so the code now validates it before trusting the row.
+JSON is another common text format for structured data; browser APIs often
+return it as named values, lists and nested objects.
+
+The current search filters by detector at IRSA and requests at most 16 rows
+per collection. If that query fails, it tries a smaller four-row request with
+bounded retries. A detector filter must happen before the row limit;
+otherwise unrelated detectors can fill the small answer first.
+
+Successful live queries took roughly 21 seconds during debugging, while
+the older timeout was 15 seconds. A timeout is how long a program waits
+before giving up. Version 2.0.3 increased the wait and bounded the retries.
+This improves recovery but cannot guarantee that an archive always answers.
+
+A limited result is a sample, not the complete observation history. Four
+frames can be minutes apart. Read the dates, UTC times and sample notice
+before assuming the sequence covers months. A valid empty result is also
+different from a failed query: no matching records is not an outage.
+
+Next, the browser asks /api/frame for the selected exposure. The server
+downloads a FITS science cutout. FITS is an astronomy format storing numeric
+image values and information about where those values belong on the sky.
+The server puts each frame onto a common coordinate grid, adjusts its display
+brightness, and returns a PNG the browser can display.
+
+A WCS, or World Coordinate System, describes the relationship between image
+pixels and sky coordinates. Common alignment helps ensure that a stationary
+object stays in the same part of the display when frames change.
+
+Playback advances only after the current image loads. This avoids running
+the timeline ahead of a slow download. A failed frame stops playback and
+provides retry or skip controls.
+
+Each frame has its own intensity stretch, which means its brightness range
+is adjusted for display. Wavelength, noise, flags and image sharpness also
+vary. A blinking point is a reason to investigate; it is not automatically
+a new moving object or a calibrated brightness measurement.
+
+5. COORDINATES AND CONTROLS
+
+Right Ascension (RA) and declination (Dec) locate a point on the sky, much
+like longitude and latitude locate a point on Earth. Here RA is entered in
+degrees from 0 up to, but excluding, 360. Dec ranges from -90 to +90 degrees.
+
+Field of view is how wide a patch is visible. There are 60 arcminutes in one
+degree. A larger SPHEREx cutout can help keep a moving object in view, but
+it does not increase the telescope's resolution or guarantee more dates.
+
+The D1-D6 setting selects a SPHEREx detector array. It is different from the
+atlas survey selector. It also does not select one exact wavelength: the
+SPHEREx filter changes across each detector. The exposure notes report the
+center wavelength when available.
+
+A shared link puts settings after the question mark in the address. For
+example, ra, dec, fov, band and mode let another person reopen a sky patch.
+Sharing settings does not freeze the external archive's contents forever.
+
+6. CACHES, REFRESHING AND WAITING
+
+A cache is a temporary copy of data already downloaded or computed. It
+reduces repeated work. It does not make the source data fabricated.
+
+The atlas keeps bounded tile and finished-image caches for up to one hour.
+SPHEREx search metadata normally stays reusable for six hours. Refresh
+archive asks IRSA again instead of using that search lookup. Images and
+observation snapshots are tied to stable identifiers so a new search cannot
+silently swap the identity of a frame already being viewed.
+
+Some caches live in memory and some metadata lives in the cache directory.
+They can disappear when Render restarts; the app can retrieve the data again.
+The basic app does not require a database or a permanent storage disk.
+
+A browser also caches website files. A hard refresh helps it load updated
+JavaScript and CSS after deployment. A hard refresh cannot fix a missing
+archive address or force an external server to answer faster.
+
+7. WHAT THE ERROR CODES MEAN
+
+200: The HTTP request succeeded. The program must still check that the body
+     contains the expected image or table. Some astronomy services can put
+     an error message inside a response with status 200.
+
+404: The requested resource was not found at that address. This was one of
+     the observed atlas failures. Repeating a wrong or unavailable address
+     is not a reliable fix.
+
+502: A gateway or proxy did not receive a usable response from the next
+     server. It can reflect temporary upstream trouble, a problematic
+     request or other network conditions. The code alone is not a diagnosis.
+
+503: A service cannot currently fulfill the request. Your app also uses
+     this status when it cannot obtain the required external data, with a
+     readable explanation in the response.
+
+Timeout: A program waited too long. It may not receive an HTTP response at
+     all. No response is not proof that the requested sky region has no data.
+
+Upstream means the next service your server asks for data. Your browser
+might receive a 503 from Render because Render received a 404 or a timeout
+from an astronomy provider. The response details help distinguish the layers.
+
+CORS is a browser rule controlling which websites JavaScript may read from.
+A server answering a URL does not necessarily allow every other website to
+read it directly in a browser. SkyMotion requests images from its own Render
+origin; Python handles the external archive requests. The observed atlas
+404 was not evidence of a CORS problem.
+
+8. WHY HEALTH CAN SAY OK WHILE AN IMAGE FAILS
+
+/api/health confirms that the Python application is responding and reports
+the deployed software version and configured SPHEREx collection. It does
+not download every image or check every outside provider.
+
+A green health response therefore does not guarantee that the atlas,
+SPHEREx metadata, every FITS file, name lookup and Gaia all work. Each feature
+has to be checked through its actual requests. It is similar to confirming
+a restaurant is open without checking whether every ingredient is in stock.
+
+9. HOW A FIX REACHES YOUR LIVE SITE
+
+A branch is a separate line of proposed code changes. A commit is a saved
+checkpoint on that branch. A pull request (PR) presents those differences
+for review before they become part of the main branch.
+
+Merge pull request accepts those changes into main. Render then deploys
+the new main commit if automatic deployment is enabled. Otherwise select
+Manual Deploy > Deploy latest commit in the Render dashboard.
+
+During a build, pip installs the Python packages listed in requirements.txt.
+The configured command also runs Python tests. The new atlas dependency is
+astropy-healpix; the existing build installs it automatically. You do not
+need to install it manually in your browser or create another Render service.
+
+After a successful build, Render starts Uvicorn with server:app. Then the
+new version serves requests. In this update, /api/health should show 2.0.4.
+Confirm that version and then test an actual atlas image and SPHEREx frame.
+
+10. WHERE THINGS LIVE IN THE PROJECT
+
+index.html:         The initial page and links to browser assets.
+style.css:          Colors, fonts, spacing and responsive layout.
+app.js:             React interface, search forms, playback and API requests.
+sky-atlas.js:       Map dragging, zooming, grid and image display.
+server.py:          FastAPI app, SPHEREx routes and FITS image processing.
+archive_client.py:  IRSA SIA/TAP searches, parsing, retries and download rules.
+sky_service.py:     Atlas API, input validation and finished-image cache.
+hips_survey.py:     IRSA tile retrieval, HEALPix mapping and JPEG rendering.
+requirements.txt:   Python packages installed during the build.
+render.yaml:        Hosting/build configuration for the Render service.
+test files:         Checks for expected behavior and known past failures.
+
+11. HOW TO CHECK A FUTURE PROBLEM
+
+Start with the deployed health version so you know which code is running.
+Record the target coordinates, survey or detector, and the exact error.
+
+In a desktop browser, open Developer Tools, usually with F12 or Inspect.
+Select Network, reproduce the problem, and look for a failed request:
+
+/api/sky.jpg        Reference atlas image.
+/api/observations   SPHEREx exposure listing.
+/api/frame/         A particular SPHEREx display image.
+/api/resolve        Object-name or coordinate lookup.
+/api/overlay/       Optional Gaia overlay.
+
+Selecting a request shows its status and response. The Console tab shows
+JavaScript errors. Render's Logs show what the Python server reports.
+The browser's console and Render's logs describe different running programs.
+
+Testing has two useful kinds of evidence. Automated checks use controlled
+inputs, including simulated failures, to catch code regressions. Live checks
+actually contact IRSA and prove that a real request worked at that time.
+Neither substitutes for the other, and a live success is not a promise that
+an outside archive will never fail again.
+
+For the 2.0.4 atlas fix, all three live survey layers, map interaction, phone
+layout and a separate live SPHEREx image were checked. VALIDATION.txt records
+the details. Missing tiles remain an explicit error rather than being filled
+with a generated sky or an unrelated saved demonstration image.

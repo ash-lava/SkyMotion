@@ -72,7 +72,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.3');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.4');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -127,45 +127,110 @@ class SkyServiceTests(unittest.TestCase):
         image=Image.new('RGB',(64,64),(20,30,40));buffer=io.BytesIO();image.save(buffer,format='JPEG');self.jpeg=buffer.getvalue()
     def tearDown(self):self.client.close();self.sky.CACHE.clear()
     def test_valid_survey_image_and_cache(self):
-        with patch.object(archive,'fetch_bytes',return_value=self.jpeg) as fetch:
+        with patch.object(self.sky.hips_survey,'render_survey',return_value=self.jpeg) as render:
             first=self.client.get('/api/sky.jpg?ra=83.8&dec=-5.3&width=64&height=64')
             second=self.client.get('/api/sky.jpg?ra=83.8&dec=-5.3&width=64&height=64')
         self.assertEqual(first.status_code,200);self.assertEqual(first.headers['content-type'],'image/jpeg')
-        self.assertEqual(first.content,second.content);self.assertEqual(fetch.call_count,1)
+        self.assertEqual(first.content,second.content);self.assertEqual(render.call_count,1)
         self.assertEqual(first.headers['x-sky-source'],'CDS/P/DSS2/color')
-    def test_automatic_second_endpoint(self):
-        with patch.object(archive,'fetch_bytes',side_effect=[archive.ArchiveError('HTTP 502'),self.jpeg]) as fetch:
-            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
-        self.assertEqual(result.status_code,200);self.assertEqual(fetch.call_count,2)
-        self.assertIn('alaskybis',fetch.call_args_list[1].args[0])
-    def test_both_endpoints_fail_with_useful_error(self):
-        with patch.object(archive,'fetch_bytes',side_effect=archive.ArchiveError('HTTP 502')):
+        self.assertIn('IRSA',first.headers['x-sky-provider'])
+    def test_tile_failure_is_actionable_and_not_cached(self):
+        with patch.object(self.sky.hips_survey,'render_survey',side_effect=archive.ArchiveError('HTTP 502')):
             result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
         self.assertEqual(result.status_code,503);self.assertEqual(result.json()['detail']['code'],'SKY_SURVEY_UNAVAILABLE')
-        self.assertEqual(len(result.json()['detail']['upstream']),2);self.assertFalse(self.sky.CACHE)
-    def test_html_is_not_cached_as_an_image(self):
-        with patch.object(archive,'fetch_bytes',return_value=b'<html>Proxy error</html>'):
-            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
-        self.assertEqual(result.status_code,503);self.assertFalse(self.sky.CACHE)
+        self.assertEqual(result.headers['retry-after'],'30');self.assertIn('IRSA',result.json()['detail']['message'])
+        self.assertEqual(result.json()['detail']['upstream'],['HTTP 502']);self.assertFalse(self.sky.CACHE)
+    def test_changed_survey_and_field_have_separate_cache_entries(self):
+        with patch.object(self.sky.hips_survey,'render_survey',return_value=self.jpeg) as render:
+            for suffix in ('survey=dss','survey=wise','survey=dss&fov=3'):
+                self.assertEqual(self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64&'+suffix).status_code,200)
+        self.assertEqual(render.call_count,3)
     def test_bad_parameters_do_not_contact_upstream(self):
-        with patch.object(archive,'fetch_bytes') as fetch:
+        with patch.object(self.sky.hips_survey,'render_survey') as render:
             for suffix in ('ra=360&dec=0','ra=1&dec=99','ra=1&dec=0&width=10000','ra=1&dec=0&fov=180'):
                 self.assertEqual(self.client.get('/api/sky.jpg?'+suffix).status_code,422)
             self.assertEqual(self.client.get('/api/sky.jpg?ra=1&dec=0&survey=https://example.com').status_code,400)
-            fetch.assert_not_called()
+            render.assert_not_called()
     def test_wcs_center_scale_and_orientation(self):
         import math
         wcs=self.sky.image_wcs(359.9,89,10,1000,500)
         self.assertEqual(wcs['CRPIX1'],500.5);self.assertEqual(wcs['CRPIX2'],250.5)
         self.assertEqual(wcs['CRVAL1'],359.9);self.assertLess(wcs['CDELT1'],0);self.assertGreater(wcs['CDELT2'],0)
         self.assertAlmostEqual(math.degrees(2*math.atan(math.radians(wcs['CDELT2'])*1000/2)),10)
-    def test_local_fallback_script_is_served(self):
+    def test_local_atlas_script_is_served(self):
         result=self.client.get('/static/sky-atlas.js');self.assertEqual(result.status_code,200)
         self.assertIn('pixelToSky',result.text)
-    def test_size_mismatch_is_rejected(self):
-        with patch.object(archive,'fetch_bytes',return_value=self.jpeg):
-            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=128&height=128')
-        self.assertEqual(result.status_code,503)
+
+class HiPSSurveyTests(unittest.TestCase):
+    def setUp(self):
+        import hips_survey
+        self.hips=hips_survey;self.hips.TILES.clear()
+        buffer=io.BytesIO();Image.new('RGB',(512,512),(20,30,40)).save(buffer,format='JPEG');self.jpeg=buffer.getvalue()
+    def tearDown(self):self.hips.TILES.clear()
+    def test_allowed_live_tile_address_and_cache(self):
+        with patch.object(archive,'fetch_bytes',return_value=self.jpeg) as fetch:
+            first=self.hips.get_tile('dss',8,182953);second=self.hips.get_tile('dss',8,182953)
+        self.assertIs(first,second);self.assertFalse(first.flags.writeable);self.assertEqual(first.shape,(512,512,3))
+        self.assertEqual(fetch.call_count,1)
+        self.assertEqual(fetch.call_args.args[0],'https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color/Norder8/Dir180000/Npix182953.jpg')
+        self.assertLessEqual(fetch.call_args.kwargs['max_bytes'],1500000)
+    def test_invalid_tile_indices_never_fetch(self):
+        with patch.object(archive,'fetch_bytes') as fetch:
+            for order,index in ((-1,0),(10,0),(0,-1),(0,12)):
+                with self.subTest(order=order,index=index),self.assertRaises(archive.ArchiveError):self.hips.get_tile('dss',order,index)
+        fetch.assert_not_called()
+    def test_html_png_and_wrong_dimensions_are_not_tiles(self):
+        png=io.BytesIO();Image.new('RGB',(512,512)).save(png,format='PNG')
+        small=io.BytesIO();Image.new('RGB',(64,64)).save(small,format='JPEG')
+        for raw in (b'<html>Proxy error</html>',png.getvalue(),small.getvalue()):
+            with self.subTest(length=len(raw)),patch.object(archive,'fetch_bytes',return_value=raw),self.assertRaises(archive.ArchiveError):
+                self.hips.get_tile('dss',0,4)
+            self.assertFalse(self.hips.TILES)
+    def test_tile_failure_does_not_poison_retry(self):
+        with patch.object(archive,'fetch_bytes',side_effect=[archive.ArchiveError('502'),self.jpeg]) as fetch:
+            with self.assertRaises(archive.ArchiveError):self.hips.get_tile('dss',0,4)
+            self.assertEqual(self.hips.get_tile('dss',0,4).shape,(512,512,3))
+        self.assertEqual(fetch.call_count,2)
+    def test_tile_cache_is_bounded_and_evicts_oldest(self):
+        with patch.object(archive,'fetch_bytes',return_value=self.jpeg) as fetch,patch.object(self.hips,'MAX_TILE_CACHE_BYTES',800000):
+            for index in (4,5,4):self.hips.get_tile('dss',0,index)
+        self.assertEqual(fetch.call_count,3);self.assertEqual(len(self.hips.TILES),1)
+    def test_expired_tile_is_fetched_again(self):
+        with patch.object(archive,'fetch_bytes',return_value=self.jpeg) as fetch:
+            self.hips.get_tile('dss',0,4)
+            self.hips.TILES[('dss',0,4)]=(-4000,self.hips.TILES[('dss',0,4)][1])
+            self.hips.get_tile('dss',0,4)
+        self.assertEqual(fetch.call_count,2)
+    def test_hips_jpeg_quadrants_follow_the_ivoa_orientation(self):
+        # Four known HEALPix face-4 quarter centers: south, east, west, north.
+        lat=np.degrees(np.arcsin(1/3))
+        ids=self.hips.pixel_addresses(np.array([0.,22.5,337.5,0.]),np.array([-lat,0.,0.,lat]),0)
+        self.assertTrue(np.all((ids>>18)==4))
+        row,col=self.hips.jpeg_positions(ids)
+        self.assertEqual(list(row>=256),[False,True,False,True])
+        self.assertEqual(list(col>=256),[False,False,True,True])
+    def test_rendered_image_is_north_up_and_east_left_across_ra_wrap(self):
+        from sky_service import image_wcs
+        tile=np.empty((512,512,3),dtype=np.uint8)
+        tile[:256,:256]=[255,0,0]      # South, per HiPS face-4 geometry.
+        tile[256:,:256]=[0,255,0]      # East.
+        tile[:256,256:]=[0,0,255]      # West.
+        tile[256:,256:]=[255,255,255]  # North.
+        with patch.dict(self.hips.SOURCES,{'dss':('https://irsa.ipac.caltech.edu/test',0)}),patch.object(self.hips,'get_tile',return_value=tile):
+            raw=self.hips.render_survey(image_wcs(359.99,0,60,64,64),'dss')
+        image=np.asarray(Image.open(io.BytesIO(raw)))
+        self.assertEqual(image.shape,(64,64,3))
+        self.assertTrue(np.all(image[8,32]>220));self.assertGreater(image[56,32,0],220)
+        self.assertGreater(image[32,8,1],220);self.assertGreater(image[32,56,2],220)
+    def test_many_tiles_reduce_order_before_network_work(self):
+        from sky_service import image_wcs
+        grid=np.arange(64*64,dtype=np.int64).reshape(64,64)%(self.hips.MAX_TILES+1)<<18
+        tile=np.zeros((512,512,3),dtype=np.uint8)
+        with patch.object(self.hips,'address_grid',side_effect=[grid,np.zeros((64,64),dtype=np.int64)]) as address,patch.object(self.hips,'get_tile',return_value=tile) as fetch:
+            raw=self.hips.render_survey(image_wcs(0,0,.01,64,64),'dss')
+        self.assertEqual(len(address.call_args_list),2)
+        self.assertEqual(address.call_args_list[0].args[3]-address.call_args_list[1].args[3],1)
+        self.assertEqual(fetch.call_count,1);self.assertTrue(raw.startswith(b'\xff\xd8'))
 
 @unittest.skipUnless(importlib.util.find_spec('astropy'),'Astropy is not installed in this test environment')
 class AstronomyTests(unittest.TestCase):
