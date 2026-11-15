@@ -1,3 +1,35 @@
+SkyMotion 2.0.7 — interface copy, 15 November 2026 (UTC)
+
+Base: f139d4b, the merged 2.0.6 coverage update.
+Changes are limited to interface wording, browser metadata, related test
+expectations and the release/version identifiers. Astronomy data access,
+image pixels, alignment, coverage masks and filter logic are unchanged.
+
+REFERENCES
+Published copy on Stellarium, NASA SkyView and Zooniverse was checked.
+Exact reference links and the editorial choices are in docs/COPY_REFERENCES.txt.
+No external slogan was copied into the interface.
+
+CHECKS
+26 existing frontend state checks passed with updated text expectations.
+65 Python tests passed, including the new release identifier.
+JavaScript syntax and git whitespace checks passed.
+Six Chromium copy/layout checks passed: intro/title, removed slogans,
+About/data notes, empty/loading/error wording, 320–1440px horizontal sizing,
+and the mobile target panel. No JavaScript runtime errors.
+
+The map in the visual check used actual IRSA reference-survey imagery.
+A controlled test-only metadata failure exercised loading/error wording;
+it is not presented as a live outage or successful new metadata search.
+No astronomy service or image-processing regression is claimed from these
+copy checks; preceding real-data validation is retained below.
+
+DEPLOY
+Merge the supplied PR and let Render deploy main. Confirm /api/health says
+2.0.7 and hard-refresh. No dependency or environment change is required.
+
+PRECEDING DATA/IMAGE VALIDATION (VERSION 2.0.6)
+
 SkyMotion 2.0.6 — validation, 15 November 2026 (UTC)
 
 BASE

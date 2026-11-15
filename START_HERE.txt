@@ -1,35 +1,16 @@
-SKYMOTION 2.0.6 — CLEAR MISSING DATA AND OPTIONAL COVERAGE FILTER
+SKYMOTION 2.0.7 — INTERFACE WORDING
 
-1. Open the supplied GitHub pull request as ash-lava.
+1. Open the supplied GitHub pull request while signed in as ash-lava.
    Select Merge pull request, then Confirm merge.
 
-2. Let Render deploy main, or use Manual Deploy > Deploy latest commit.
-   No new dependency, API key or environment setting is required.
+2. Let Render deploy main. If auto-deploy is off, select:
+   Render > SkyMotion > Manual Deploy > Deploy latest commit.
 
-3. Confirm https://skymotion-sk2p.onrender.com/api/health reports 2.0.6.
-   Hard-refresh the website after deployment.
+3. Confirm https://skymotion-sk2p.onrender.com/api/health reports 2.0.7.
+   Hard-refresh the site after deployment.
 
-4. Load a SPHEREx sequence. Missing/invalid science pixels now show diagonal
-   hatching, with a legend and valid-pixel percentage. Valid dark pixels stay
-   opaque; no data is invented to fill the gaps.
+The interface now uses “Find a target,” direct instructions and plain status
+messages. Promotional taglines were removed. Data sources, science notes,
+coverage filtering, map navigation and image handling retain their behavior.
 
-5. In the timeline, choose Coverage > At least 95% covered to check the loaded
-   frames and restrict playback to those with sufficient valid coverage.
-   The first check downloads cutouts and can take a minute or longer.
-   Progress is shown and playback pauses. Choose All frames to cancel the
-   check or restore partial exposures. Unverified frames are counted and
-   excluded from the filtered view. Coverage is separate from quality flags.
-
-6. Save metadata retains all returned records, including excluded frames,
-   measured coverage where known, source indices and the active threshold.
-
-The all-sky atlas and live IRSA searches remain available. A smaller SPHEREx
-cutout may improve coverage, but increasing zoom cannot restore missing data.
-
-For infrared color, docs/spherex-color-preview.png is a real-data static M101
-example: D6 -> red, D3 -> green, D1 -> blue. The observations span May 9-22,
-2025, so it is not simultaneous color or a color-playback mode. Source records
-and a reproducible generation utility are included. The saved example is
-used for documentation, not as a substitute for live application data.
-
-HOW_IT_WORKS.txt explains the system. VALIDATION.txt records the live checks.
+No new dependency, API key or environment variable is needed.

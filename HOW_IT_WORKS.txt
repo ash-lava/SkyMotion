@@ -1,5 +1,5 @@
 SKYMOTION: A BEGINNER'S GUIDE
-Applies to version 2.0.6
+Applies to version 2.0.7
 
 You have built a website that runs in more than one place. Understanding
 which part is doing a job makes its error messages much less mysterious.
@@ -110,7 +110,7 @@ Use this sky position copies the current map center into the selected
 SPHEREx patch without zooming the atlas back in. The SPHEREx cutout size is
 a separate control: a 360-degree atlas overview can still request only a
 6-arcminute SPHEREx science cutout. Switching between views remembers your
-atlas location. Share patch includes the map center and zoom in atlas_ra,
+atlas location. Share view includes the map center and zoom in atlas_ra,
 atlas_dec and atlas_fov, independently of the selected target coordinates.
 
 4. WHAT HAPPENS WHEN YOU LOAD SPHEREX EXPOSURES
@@ -302,7 +302,7 @@ astropy-healpix; the existing build installs it automatically. You do not
 need to install it manually in your browser or create another Render service.
 
 After a successful build, Render starts Uvicorn with server:app. Then the
-new version serves requests. In this update, /api/health should show 2.0.6.
+new version serves requests. In this update, /api/health should show 2.0.7.
 Confirm that version and then test an actual atlas image and SPHEREx frame.
 
 10. WHERE THINGS LIVE IN THE PROJECT
