@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.5'
+VERSION = '2.0.6'
 app = FastAPI(title='SkyMotion', version=VERSION)
 from sky_service import router as sky_router
 app.include_router(sky_router)
@@ -241,22 +241,30 @@ def get_image(key, index):
 @app.get('/api/frame/{key}/{index}.png')
 def frame(key: str, index: int):
     array, _, _, _ = get_image(key, index)
-    valid = array[np.isfinite(array)]
+    finite = np.isfinite(array)
+    valid = array[finite]
     low, high = np.percentile(valid, [5, 99.5])
     high = max(high, low + 1e-8)
-    intensity = np.clip((np.nan_to_num(array, nan=low) - low) / (high - low), 0, 1)
+    intensity = np.clip((np.where(finite, array, low) - low) / (high - low), 0, 1)
     # FITS y increases upward. Flip PNG so north remains at the top.
     gray = np.flipud(np.uint8(np.sqrt(intensity) * 255))
+    # Missing science pixels stay transparent, distinct from valid dark pixels.
+    alpha = np.flipud(finite.astype(np.uint8) * 255)
+    rgba = np.stack((gray, gray, gray, alpha), axis=-1)
     buffer = io.BytesIO()
-    Image.fromarray(gray).save(buffer, format='PNG')
+    Image.fromarray(rgba).save(buffer, format='PNG')
     return Response(buffer.getvalue(), media_type='image/png', headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/frame-info/{key}/{index}')
 def frame_info(key: str, index: int):
     array, row, _, info = get_image(key, index)
+    valid_pixels = int(np.isfinite(array).sum())
     return {**{k: v for k, v in row.items() if k != 'url'}, **info,
-            'coverage': float(np.isfinite(array).mean()), 'stretch': 'Independent 5–99.5 percentile square-root stretch.'}
+            'coverage': valid_pixels / array.size, 'valid_pixels': valid_pixels,
+            'missing_pixels': int(array.size - valid_pixels), 'total_pixels': int(array.size),
+            'coverage_definition': 'Fraction of the aligned patch with finite science values; quality flags are separate.',
+            'stretch': 'Independent 5–99.5 percentile square-root stretch.'}
 
 
 def gaia_stars(ra, dec, radius):

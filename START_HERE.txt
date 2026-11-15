@@ -1,35 +1,35 @@
-SKYMOTION 2.0.5 — FREE SKY NAVIGATION
+SKYMOTION 2.0.6 — CLEAR MISSING DATA AND OPTIONAL COVERAGE FILTER
 
-1. Open the supplied pull request while signed into GitHub as ash-lava.
+1. Open the supplied GitHub pull request as ash-lava.
    Select Merge pull request, then Confirm merge.
 
-2. Let Render deploy main automatically, or use:
-   Render Dashboard > SkyMotion > Manual Deploy > Deploy latest commit.
-   No new package, API key or environment setting is needed beyond 2.0.4.
+2. Let Render deploy main, or use Manual Deploy > Deploy latest commit.
+   No new dependency, API key or environment setting is required.
 
-3. Check https://skymotion-sk2p.onrender.com/api/health for version 2.0.5.
+3. Confirm https://skymotion-sk2p.onrender.com/api/health reports 2.0.6.
    Hard-refresh the website after deployment.
 
-4. Open Sky atlas, or use:
-   https://skymotion-sk2p.onrender.com/?mode=atlas
+4. Load a SPHEREx sequence. Missing/invalid science pixels now show diagonal
+   hatching, with a legend and valid-pixel percentage. Valid dark pixels stay
+   opaque; no data is invented to fill the gaps.
 
-   - Drag anywhere to explore beyond the selected object.
-   - Scroll/pinch or use +/- to zoom. All sky shows the complete sphere.
-   - Enter any valid RA/Dec under Go to any RA / Dec.
-     RA: 0 up to, but excluding, 360 degrees. Dec: -90 through +90 degrees.
-   - Choosing coordinates or a suggested place preserves the atlas zoom.
-   - The selected SPHEREx patch is a marker, not a limit on map coverage.
-   - Use this sky position selects the map center for an exposure search.
-   - Return to selected patch recenters the map without changing its zoom.
-   - Share patch preserves the map's actual center and zoom.
+5. In the timeline, choose Coverage > At least 95% covered to check the loaded
+   frames and restrict playback to those with sufficient valid coverage.
+   The first check downloads cutouts and can take a minute or longer.
+   Progress is shown and playback pauses. Choose All frames to cancel the
+   check or restore partial exposures. Unverified frames are counted and
+   excluded from the filtered view. Coverage is separate from quality flags.
 
-The map location/zoom and SPHEREx cutout are independent. Switching to the
-sequence and back keeps the map where you left it. An all-sky overview does
-not request a whole-sky SPHEREx cutout; exposure cutouts remain 1-12 arcmin.
+6. Save metadata retains all returned records, including excluded frames,
+   measured coverage where known, source indices and the active threshold.
 
-All images come from live IRSA archive products. No fixed demonstration
-field limits the map. External service failures remain possible; Retry map
-retries a failed image. Some surveys show plate boundaries and uneven
-backgrounds when viewed at very large scales.
+The all-sky atlas and live IRSA searches remain available. A smaller SPHEREx
+cutout may improve coverage, but increasing zoom cannot restore missing data.
 
-See HOW_IT_WORKS.txt for the beginner guide and VALIDATION.txt for evidence.
+For infrared color, docs/spherex-color-preview.png is a real-data static M101
+example: D6 -> red, D3 -> green, D1 -> blue. The observations span May 9-22,
+2025, so it is not simultaneous color or a color-playback mode. Source records
+and a reproducible generation utility are included. The saved example is
+used for documentation, not as a substitute for live application data.
+
+HOW_IT_WORKS.txt explains the system. VALIDATION.txt records the live checks.

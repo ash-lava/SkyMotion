@@ -2,13 +2,21 @@
 
 A React sky explorer with a black and pale-gold interface, live IRSA searches, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** to update the existing Render service.
 
-## Version 2.0.5: free sky navigation
+## Version 2.0.6: visible missing data and a coverage filter
+
+Missing SPHEREx science pixels are transparent and show a hatched background, with a coverage percentage and legend. Valid dark pixels remain opaque. No pixels are filled from another exposure or the reference atlas.
+
+The timeline's **Coverage** selector defaults to **All frames**. Choose **At least 95% covered** to check the loaded cutouts and restrict playback to verified frames meeting that threshold. The first check downloads science cutouts and can take a minute or longer; progress is shown, playback pauses, and selecting All frames cancels the check. Unverified frames are excluded from this filtered view and counted separately. All frames remain available. Coverage measures finite science pixels, independently of quality flags.
+
+Filtered navigation retains the original exposure identifiers. Metadata export retains every returned observation, measured coverage where known, displayed source indices and the active threshold. No new dependency or setting is needed; `/api/health` should report **2.0.6** after deployment.
+
+## Free sky navigation (introduced in 2.0.5)
 
 Pan beyond the selected object, enter any valid RA/Dec, and zoom out to a complete all-sky overview. The atlas has its own center and zoom, independent of the selected SPHEREx patch. Changing a target keeps your map zoom; switching views or sharing a link preserves the panned location and zoom.
 
 The **All sky** control fits the complete sphere into the viewport. Coordinate entry opens in atlas mode; suggested places remain available in a collapsible list. A marker identifies the selected SPHEREx patch without bounding the map. **Use this sky position** selects the current map center for a later exposure search while preserving the surrounding view.
 
-No dependency or environment change is needed relative to 2.0.4. After deployment, `/api/health` should report **2.0.5**.
+No dependency or environment change is needed relative to 2.0.4. After deployment, `/api/health` should report **2.0.6**.
 
 ## Sky atlas
 
@@ -16,7 +24,7 @@ The atlas now displays real DSS, 2MASS and AllWISE imagery from NASA/IPAC IRSA's
 
 `hips_survey.py` selects the needed survey tiles, projects them onto the requested ICRS view, with north up at its center and east left and returns a JPEG through `/api/sky.jpg`. Dragging, zooming, survey selection and the coordinate grid remain available. Tile count, downloads, cached bytes and simultaneous reprojection are bounded. This is a reference map built from real survey data; it is separate from SPHEREx exposure playback.
 
-Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.5**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
+Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.6**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
 
 ## SPHEREx live search (introduced in 2.0.3)
 
@@ -94,6 +102,14 @@ Atlas links also include `atlas_ra`, `atlas_dec`, and `atlas_fov`. These preserv
 - Gaia uses a linear proper-motion approximation from J2016.0, without parallax or perspective acceleration. Missing rings are not evidence of a discovery. Presets are catalog/challenge finding coordinates, not ephemerides. Barnard's Star, Epsilon Indi B, and WISE 0855 default to larger fields to allow for motion.
 - The brightness tool uses a fixed 12-arcsecond-radius central aperture and 24–36-arcsecond background annulus on the reprojected image. It reports aperture mean minus annular median, an exploratory surface-brightness proxy; it does not track a moving source, match wavelength, apply PSF corrections, propagate errors, or produce calibrated photometry. Its results are displayed as a table to avoid implying a validated light curve.
 
+## Infrared color feasibility example
+
+SPHEREx can produce false-color composites from real infrared wavelengths. [This generated M101 example](docs/spherex-color-preview.png) assigns D6 (4.851 µm) to red, D3 (2.196 µm) to green and D1 (0.991 µm) to blue. Its [source provenance](docs/spherex-color-provenance.json) records the live IRSA products, wavelengths and valid coverage. These observations are from **9 and 22 May 2025**. This is a labeled static feasibility example, not simultaneous color or a color-playback feature.
+
+The three FITS science arrays are aligned on a common grid. Only pixels valid in all three channels are shown; each channel uses the existing 5–99.5 percentile square-root stretch. Colors are qualitative; observation-time differences, flags, noise, PSF and processing differences can create colored features. Color playback would need suitable wavelength/date groups and explicit provenance.
+
+Regenerate the example from the documented public IRSA cutouts with `python tools/make_color_example.py --output-dir /tmp/skymotion-color`. It is a documentation utility; the web application does not load the saved example as sky data.
+
 ## Checks
 
 ```bash
@@ -105,7 +121,7 @@ node test_map_loader.cjs
 
 The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test browser layout.
 
-Validation of version 2.0.5: **63 Python tests, 22 frontend state tests, 15 atlas geometry/lifecycle tests, and 5 map lifecycle integration tests passed.** Live browser checks cover free navigation, all sky, arbitrary coordinates, RA wrapping, sharing, view restoration and phone layout; a separate live SPHEREx regression check verifies the independent cutout size. Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
+Validation of version 2.0.6: **65 Python tests, 26 frontend state tests, 15 atlas geometry/lifecycle tests, and 5 map lifecycle integration tests passed.** Five unmocked browser checks verify the actual partially covered M101 exposure, mask counts, coverage filtering, stable frame indices, export and responsive layout. Earlier free-map and live-search regressions remain covered. Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
 
 ## Data sources and documentation
 

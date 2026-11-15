@@ -89,5 +89,28 @@ function normal(url){if(url.startsWith('/api/observations'))return response(sequ
   const ui=setup('?mode=atlas&atlas_fov=360');ui.setResponder(normal);await ui.click('Load SPHEREx exposures');
   const call=ui.calls.find(u=>u.startsWith('/api/observations?'));assert.equal(new URL(call,'https://example.test').searchParams.get('fov'),'6');ui.cleanup();
  });
+ await test('Coverage filter keeps immutable source indices for frames and overlays',async()=>{
+  const ui=setup('?mode=atlas');const values=[1,.76,.98];ui.setResponder(url=>url.startsWith('/api/frame-info/')?response({coverage:values[Number(url.split('/').at(-1))],wavelength_um:1.2}):normal(url));
+  await ui.click('Load SPHEREx exposures');await ui.imageLoaded();await ui.change('Exposure coverage','good');
+  assert.match(ui.text(),/2 of 3 exposures/);await ui.click('Next exposure');
+  assert.ok(ui.calls.some(u=>u.endsWith('/2.png')));ui.nodes().find(n=>n.type==='input'&&n.props.type==='checkbox').props.onChange({target:{checked:true}});await ui.settle();assert.ok(ui.calls.some(u=>u.endsWith('/2.json')));assert.match(ui.byType('img').props.alt,/03 Jan 2026/);
+  await ui.imageLoaded();await ui.change('Exposure coverage','all');assert.equal(ui.field('Exposure number').props.value,2);ui.cleanup();
+ });
+ await test('Coverage excludes unverified frames and preserves all-frame recovery',async()=>{
+  const ui=setup('?mode=atlas');ui.setResponder(url=>url.startsWith('/api/frame-info/')?(url.endsWith('/1')?response({detail:'Unavailable'},502):response({coverage:.8})):normal(url));
+  await ui.click('Load SPHEREx exposures');await ui.change('Exposure coverage','good');
+  assert.match(ui.text(),/No frames meet this coverage filter/);assert.match(ui.text(),/1 exposures could not be checked/);
+  assert.equal(ui.button('Play observations').props.disabled,true);await ui.click('Show all frames');assert.match(ui.text(),/3 of 3 exposures/);ui.cleanup();
+ });
+ await test('Cancelled coverage checks cannot overwrite a changed detector',async()=>{
+  const ui=setup('?mode=atlas');let finish;ui.setResponder(url=>url.startsWith('/api/frame-info/')?new Promise(resolve=>finish=resolve):normal(url));
+  await ui.click('Load SPHEREx exposures');await ui.change('Exposure coverage','good');
+  assert.equal(ui.button('Play observations').props.disabled,true);await ui.change('SPHEREx detector','D4');
+  finish(response({coverage:1}));await ui.settle();assert.doesNotMatch(ui.text(),/3 of 3 exposures/);assert.equal(ui.field('SPHEREx detector').props.value,'D4');ui.cleanup();
+ });
+ await test('Missing-data legend distinguishes coverage from flag quality',async()=>{
+  const ui=setup('?mode=atlas');ui.setResponder(url=>url.startsWith('/api/frame-info/')?response({coverage:.7599555,flagged_fraction:1}):normal(url));
+  await ui.click('Load SPHEREx exposures');assert.match(ui.text(),/76.0% valid pixels/);assert.match(ui.text(),/Hatching: no valid data/);ui.cleanup();
+ });
  console.log(`${passed} frontend state tests passed (no browser rendering).`);
 })().catch(err=>{console.error(err);process.exitCode=1;});

@@ -1,5 +1,5 @@
 SKYMOTION: A BEGINNER'S GUIDE
-Applies to version 2.0.5
+Applies to version 2.0.6
 
 You have built a website that runs in more than one place. Understanding
 which part is doing a job makes its error messages much less mysterious.
@@ -165,6 +165,47 @@ is adjusted for display. Wavelength, noise, flags and image sharpness also
 vary. A blinking point is a reason to investigate; it is not automatically
 a new moving object or a calibrated brightness measurement.
 
+Missing pixels and the coverage control
+
+An exposure may cover the center of the requested patch while its edge cuts
+across part of the square. Missing or invalid science pixels now show the
+hatched background. Real pixels with low brightness remain solid dark gray
+or black, so missing data is visually different from a dark measurement.
+
+Coverage is the percentage of displayed pixels with finite science values
+after alignment. It is separate from the flagged-pixel percentage. A frame
+can cover the whole patch while still containing flagged measurements.
+
+Coverage defaults to All frames. Choose At least 95% covered in the timeline
+to check the loaded exposures and keep only verified frames meeting that
+threshold in playback. The first check fetches real cutouts and can take a
+minute or longer. Progress is shown; playback pauses. Select All frames to
+cancel or restore the partial images. A frame that could not be checked is
+reported as unverified and excluded from this filtered view.
+
+Filtering does not delete observations or fill missing pixels. Metadata
+export includes every original record, measured coverage where known, which
+source indices are displayed and the threshold. Fewer displayed frames can
+also reduce the available time baseline, so keep that in mind when blinking.
+
+SPHEREx color
+
+Yes, infrared bands can be assigned to visible red, green and blue to make
+a false-color image, as in many astronomy images. The colors represent
+infrared measurements rather than how the object looks to human eyes.
+
+The repository includes docs/spherex-color-preview.png, made from real M101
+D1, D3 and D6 FITS data retrieved from IRSA. Their center wavelengths are
+about 0.991, 2.196 and 4.851 micrometers. Only pixels valid in every channel
+are displayed. The channels use independent brightness stretches.
+
+The available example observations were taken on May 9 and May 22, 2025.
+It is a static demonstration, not a simultaneous color image or color movie.
+A moving or variable source can change between those dates; differing image
+sharpness, noise and flags can also create colors. A trustworthy color
+playback mode would need appropriate time and wavelength groupings. The
+source records and method are saved with the example in the docs directory.
+
 5. COORDINATES AND CONTROLS
 
 Right Ascension (RA) and declination (Dec) locate a point on the sky, much
@@ -261,7 +302,7 @@ astropy-healpix; the existing build installs it automatically. You do not
 need to install it manually in your browser or create another Render service.
 
 After a successful build, Render starts Uvicorn with server:app. Then the
-new version serves requests. In this update, /api/health should show 2.0.5.
+new version serves requests. In this update, /api/health should show 2.0.6.
 Confirm that version and then test an actual atlas image and SPHEREx frame.
 
 10. WHERE THINGS LIVE IN THE PROJECT

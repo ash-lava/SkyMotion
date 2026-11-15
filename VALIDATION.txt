@@ -1,91 +1,98 @@
-SkyMotion 2.0.5 — validation, 15 November 2026 (UTC)
+SkyMotion 2.0.6 — validation, 15 November 2026 (UTC)
 
-BASE AND PURPOSE
-26c642d, the merged IRSA atlas repair, version 2.0.4.
-The atlas now navigates freely beyond the selected target. The map center
-and zoom are independent of the selected SPHEREx patch and cutout width.
+BASE
+747bc0b, the merged free-sky-navigation update, version 2.0.5.
+The change is prepared for review; production deployment is not implied.
 
-BEHAVIOR
-- A 6-degree surrounding view opens by default. Any valid decimal RA/Dec
-  can be entered in the visible coordinate form, including celestial poles.
-- Selecting coordinates or a preset retains the atlas zoom.
-- All sky displays the complete sphere using Hammer-Aitoff projection.
-  Local views up to 60 degrees retain TAN projection; wider values control
-  overview zoom, with 360 fitting the full sphere on landscape or portrait.
-- Drag, scroll/pinch, zoom buttons and keyboard controls navigate the map.
-  RA wraps through zero. A selected target is a marker, not a map boundary.
-- Switching views restores the last atlas position, zoom and grid state.
-  Shared links save atlas_ra, atlas_dec and atlas_fov separately from the
-  selected SPHEREx coordinates and 1-12 arcminute cutout width.
-- Use this sky position selects the current center without resetting zoom.
-  Suggested places are expandable; coordinates remain prominent in atlas mode.
+CONFIRMED SCREENSHOT EXPOSURE
+The M101 D2 image at 2025-05-10T21:58:09.091200Z is observation
+2025W19_2B_0377_1, the fifth exposure in the live returned sequence.
+The real aligned 192 x 192 science array contains 28,015 finite pixels and
+8,849 missing pixels. Valid coverage is 0.7599555121527778, about 76%.
+The diagonal gap is absent/invalid science coverage after alignment.
 
-GEOMETRY
-The browser and server share TAN / inverse Hammer-Aitoff geometry. Wide-view
-rotation handles both exact poles. Invalid pixels outside the all-sky ellipse
-are masked before HEALPix lookup; they are rendered blank. TAN's LONPOLE is
-explicitly 180 degrees so orientation also matches at the exact north pole.
-Nearest-pixel sampling and the existing fixed-source/tile/memory bounds remain.
+DISPLAY AND FILTER
+The PNG is RGBA. Non-finite science pixels have alpha 0; valid pixels,
+including valid zeros, have alpha 255. The existing grayscale stretch and
+north-up orientation are retained. A CSS hatch behind the image is visible
+only through the transparent pixels, with an explanatory legend.
+
+The optional At least 95% covered selector checks actual frame-info/FITS
+coverage for the loaded sequence, sequentially, with progress and cancellation.
+Playback pauses during checks. Only verified frames meeting the threshold
+enter filtered playback. Unverified frames are reported and excluded from
+that view, rather than being called zero coverage. All frames restores the
+original sequence; changing the target/detector/search cancels old checks.
+
+Display positions map to original source indices for images, metadata and
+Gaia overlays. Export retains all returned rows with measured coverage where
+known, displayed flags, displayed source indices and the chosen threshold.
+The filter does not reject quality flags. Brightness-proxy measurements keep
+the original sequence and explicitly disclose that when filtering is active.
 
 AUTOMATED CHECKS
-63 Python unittest cases passed.
-22 React/htm frontend state checks passed.
+65 Python unittest cases passed.
+26 React/htm state checks passed.
 15 atlas geometry/lifecycle checks passed.
 5 map lifecycle integration checks passed.
-Total: 105 automated checks. JavaScript syntax and git whitespace checks passed.
+Total: 111 automated checks, plus JavaScript syntax and git whitespace checks.
 
-New checks verify all-sky coordinates against independent Astropy WCS,
-portrait/landscape full-sky coverage, exact poles, masking outside the ellipse,
-RA wrapping, stable map zoom, independent map/target URLs, coordinate entry,
-map restoration on mount, and independent SPHEREx cutout size.
+New checks cover transparency versus valid dark values, exact mask counts,
+unchanged grayscale intensities, source-index preservation for filtered
+images/overlays, unverified results, empty-filter recovery, cancelled scans
+and coverage labels. Earlier live-search, WCS and free-map checks remain.
 
-Run:
-python -m unittest -q test_server.py
-node test_frontend.cjs
-node test_sky_atlas.cjs
-node test_map_loader.cjs
+FIVE UNMOCKED COVERAGE BROWSER CHECKS
+A fresh local API search queried IRSA and returned 16 M101 D2 exposures,
+HTTP 200 in 21.61 seconds. The browser used this genuine current search
+through the normal cache. No metadata or image response was mocked.
 
-LIVE HTTP IMAGE CHECKS
-Actual IRSA survey downloads through the new backend, 900 x 500 images:
-- Full sky, RA 210.80227, Dec +54.34895, zoom width 360, DSS:
-  HTTP 200 in 2.42 seconds.
-- Distant field, RA 83.82208, Dec -5.39111, field 6 degrees, DSS:
-  HTTP 200 in 1.12 seconds.
-- Exact north pole, RA 0, Dec +90, zoom width 360, WISE:
-  HTTP 200 in 1.04 seconds.
+1. The exact screenshot exposure rendered with an alpha mask matching the
+   API's missing-pixel count. Valid dark pixels remained opaque. The hatch
+   background and 76.0% valid-pixel legend were visible.
+2. Checking actual returned science cutouts kept 14 of 16 frames at >=95%
+   coverage. Export retained all 16 original rows and measured fractions.
+3. Filtered navigation fetched the correct original immutable frame index.
+4. Returning to All frames preserved identity and restored the partial image.
+5. Controls, hatch legend, notices and frame heading fit 320 x 640 through
+   1440 x 1000 viewports without horizontal overflow or timeline overlap.
 
-Final backend also returned actual 600 x 400, 3-degree TAN images centered
-at RA 123.456, Dec -90 and +90: HTTP 200 in 2.78 and 1.89 seconds.
+No JavaScript runtime errors were recorded. docs/partial-coverage-* show the
+actual IRSA exposure, with missing science pixels displayed transparently.
 
-EIGHT UNMOCKED MAP BROWSER CHECKS
-1. Broad surrounding field opens, with visible coordinate entry.
-2. All sky displays the complete sphere using real IRSA imagery.
-3. A jump to a far coordinate pair preserves the chosen overview zoom.
-4. Dragging across RA 360 wraps into RA zero, far from the selected target.
-5. Sharing/reloading restores the independently panned map center and zoom.
-6. Switching to sequence and back retains map position and zoom.
-7. Adopting the current center for SPHEREx retains the surrounding map field.
-8. Full sky fits a phone without horizontal overflow; coordinate entry works.
+INFRARED COLOR FEASIBILITY
+Fresh detector-filtered SIA queries for M101 returned genuine D1, D3 and D6
+records. Actual IRSA FITS cutouts were downloaded and aligned on the same
+6-arcminute, 192 x 192 sky grid. The primary celestial WCS is TAN-SIP; the
+alternate spectral WCS ignores SIP as in the existing image pipeline.
 
-These scenarios made no SPHEREx metadata request and used no response mocks.
-There were no JavaScript runtime errors. docs/all-sky-* screenshots show real
-IRSA DSS reference imagery. The earlier docs/atlas-* and docs/sequence-*
-screenshots also contain real archive imagery from previous verification.
+The documented static RGB preview assigns:
+- Blue:  D1, center wavelength 0.9905724551 um, 22 May 2025 16:02:50 UTC.
+- Green: D3, center wavelength 2.1955285846 um, 9 May 2025 03:33:55 UTC.
+- Red:   D6, center wavelength 4.8509102622 um, 9 May 2025 03:33:55 UTC.
 
-SEPARATE LIVE SPHEREX REGRESSION
-A page restored with atlas_fov=360 and a 6-arcminute SPHEREx cutout completed
-a live IRSA search and displayed its actual FITS frame. The observation API
-request used fov=6, not 360. It made no atlas image request and produced no
-JavaScript runtime errors. Thus the new global map zoom does not enlarge or
-break the SPHEREx science cutout.
+Only pixels valid in all three channels are shown; common coverage is
+0.9989149305555556. Each channel uses an independent 5-99.5 percentile
+square-root stretch. The preview is explicitly labeled with its mixed dates.
+docs/spherex-color-provenance.json records sources, dates, wavelengths,
+coverage and download hashes. tools/make_color_example.py regenerates the
+example from these documented public IRSA cutouts. Fresh regeneration was
+checked against the original RGB/alpha data and reproduced its pixel values.
+
+This is a static feasibility example, not simultaneous color or a color
+playback mode. The date span is about 13.5 days. Motion, variability, flags,
+PSF and processing differences can cause colored features; the independently
+stretched colors are qualitative rather than calibrated spectral ratios.
+The application does not use the saved example as a runtime data fallback.
 
 LIMITS AND DEPLOYMENT
-Verified locally against live IRSA services, not after a Render deployment.
-Survey plate boundaries and uneven backgrounds can be visible at whole-sky
-scale. These are reference composites, not a live camera or calibrated
-photometry. The atlas is reprojected after navigation rather than streaming
-progressive tiles in the browser. External data-service failures remain
-possible. SPHEREx still returns limited samples, not a complete survey census.
+Validated locally against IRSA, not after deploying to Render. Coverage is
+measured from finite aligned science pixels, not an instrument quality-mask
+policy. The >=95% filter applies only to the loaded sample, can reduce the
+time baseline and can take a minute or longer on its first run. It cannot
+fill a detector gap or guarantee identical coverage at every sky position.
+External service failures remain possible. No coaddition or synthetic sky
+is introduced, and the archive search still reports limited live samples.
 
-Merge the new PR, let Render deploy main, and confirm /api/health reports
-2.0.5. No dependency or environment change is required relative to 2.0.4.
+Merge the PR and let Render deploy main, then confirm /api/health says
+2.0.6. No new dependency or environment variable is required.
