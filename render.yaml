@@ -3,9 +3,13 @@ services:
     name: skymotion
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python -m unittest -q test_server.py
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.3
+        value: 3.12.8
+      - key: SPHEREX_COLLECTIONS
+        value: spherex_dr1
+      - key: CACHE_TTL
+        value: '21600'

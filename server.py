@@ -1,249 +1,334 @@
-"""SkyMotion: IRSA SIA2-backed SPHEREx observation explorer."""
-import re, io, os, math, time, hashlib, threading
+"""SkyMotion: a real sky atlas and WCS-aligned SPHEREx sequence viewer."""
+import hashlib
+import io
+import json
+import math
+import os
+import re
+import threading
+import time
+import uuid
+import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse
+from urllib.parse import quote
+
 import numpy as np
-import requests
-from astropy.io import fits
-from astropy.table import Table
-from astropy.time import Time
-from astropy.wcs import WCS
-from astropy.nddata import Cutout2D
-from astropy.coordinates import SkyCoord
-import astropy.units as u
-from PIL import Image
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import Response, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, Response
+from PIL import Image
 
-ROOT=Path(__file__).resolve().parent
-CACHE=ROOT/'cache'; CACHE.mkdir(exist_ok=True)
-app=FastAPI(title='SkyMotion real SPHEREx API')
-SESS=requests.Session(); SESS.headers['User-Agent']='SkyMotion-SPHEREx-Hackathon/1.0 (IRSA SIA2 client)'
-# Candidate IRSA SIA2 collections. Each is probed at runtime; only ones IRSA answers are searched.
-# New release? SPHEREX_COLLECTIONS=spherex_qr,spherex_qr2,<new>
-CANDIDATES=os.environ.get('SPHEREX_COLLECTIONS','spherex_qr,spherex_qr2,spherex_qr3,spherex_dr1,spherex_qr_deep').split(',')
-COLLECTIONS=tuple(CANDIDATES)
-CACHE_TTL=int(os.environ.get('CACHE_TTL','21600'))
-lock=threading.Lock()
+import archive_client as archive
 
-_PROBE={'t':0,'ok':[],'bad':{}}
-def live_collections(force=False):
-    if force or time.time()-_PROBE['t']>3600:
-        def probe(c):
-            r=SESS.get('https://irsa.ipac.caltech.edu/SIA',params={'COLLECTION':c,'POS':'CIRCLE 127.69444 -39.17760 0.01','RESPONSEFORMAT':'votable'},timeout=30)
-            r.raise_for_status();Table.read(io.BytesIO(r.content),format='votable')
-        ok=[];bad={}
-        with ThreadPoolExecutor(max_workers=len(CANDIDATES)) as pool:
-            fs={pool.submit(probe,c):c for c in CANDIDATES}
-            for f in as_completed(fs):
-                try:f.result();ok.append(fs[f])
-                except Exception as e:bad[fs[f]]=f'{type(e).__name__}: {str(e)[:90]}'
-        _PROBE.update(t=time.time() if ok else 0,ok=[c for c in CANDIDATES if c in ok],bad=bad)
-    return _PROBE['ok'] or list(CANDIDATES)  # if nothing answered, try all so real errors surface
+ROOT = Path(__file__).resolve().parent
+CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
+CACHE.mkdir(parents=True, exist_ok=True)
+CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
+VERSION = '2.0.0'
+app = FastAPI(title='SkyMotion', version=VERSION)
+STATE_LOCK = threading.RLock()
+IMAGE_LOCK = threading.Lock()  # bound memory / simultaneous FITS decoding on small Render instances
+FRAMES, GAIA = OrderedDict(), OrderedDict()
+STATUS = {'checked': None, 'live': [], 'unavailable': {}}
+SIZE = 192
 
-def get_table(ra,dec,radius,collection):
-    resp=SESS.get('https://irsa.ipac.caltech.edu/SIA',params={'COLLECTION':collection,'POS':f'CIRCLE {ra:.7f} {dec:.7f} {radius:.6f}','RESPONSEFORMAT':'votable'},timeout=75)
-    resp.raise_for_status()
-    table=Table.read(io.BytesIO(resp.content),format='votable')
-    return table
 
-def strval(row,key,default=''):
+def valid_key(key):
+    if not re.fullmatch(r'[a-f0-9]{24}', key):
+        raise HTTPException(400, 'Invalid search key.')
+
+
+def key_for(ra, dec, fov, detector, limit):
+    query = [VERSION, archive.COLLECTIONS, ra, dec, fov, detector, limit]
+    return hashlib.sha256(json.dumps(query).encode()).hexdigest()[:24]
+
+
+def write_cache(key, payload):
+    temp = CACHE / f'{key}.{uuid.uuid4().hex}.tmp'
+    temp.write_text(json.dumps(payload), encoding='utf-8')
+    temp.replace(CACHE / f'{key}.json')
+    # Bound persistent disk usage. Search files contain metadata only.
+    files = sorted(CACHE.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in files[300:]:
+        path.unlink(missing_ok=True)
+
+
+def read_search(key):
+    valid_key(key)
+    path = CACHE / f'{key}.json'
     try:
-        v=row[key]
-        if np.ma.is_masked(v): return default
-        return str(v)
-    except (KeyError,ValueError): return default
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        raise HTTPException(404, 'Search expired. Load this patch again.')
 
-def floatval(row,key,default=None):
-    try:
-        v=float(row[key]); return v if math.isfinite(v) else default
-    except (KeyError,TypeError,ValueError): return default
 
-def mjd_to_iso(mjd):
-    try: return Time(mjd,format='mjd').isot[:19]+'Z'
-    except Exception: return ''
+def public_payload(payload):
+    return {**payload, 'observations': [{k: v for k, v in row.items() if k != 'url'} for row in payload['observations']]}
 
-def key_for(ra,dec,radius,detector,limit):
-    return hashlib.sha256(f'{",".join(CANDIDATES)}:{ra:.6f}:{dec:.6f}:{radius:.6f}:{detector}:{limit}'.encode()).hexdigest()[:24]
-
-@app.get('/api/archive')
-def archive(refresh:bool=False):
-    live_collections(refresh);return {'live':_PROBE['ok'],'unavailable':_PROBE['bad'],'checked':_PROBE['t']}
 
 @app.get('/api/health')
-def health():return {'ok':True,'archive':'NASA/IPAC IRSA SIA2','collections':CANDIDATES}
+def health():
+    return {'ok': True, 'version': VERSION, 'archive': 'NASA/IPAC IRSA SIA2', 'collections': archive.COLLECTIONS}
+
+
+@app.get('/api/archive')
+def archive_status():
+    # This reports the last real query; it does not send five speculative probes.
+    with STATE_LOCK:
+        return {**STATUS, 'configured': archive.COLLECTIONS,
+                'status': 'unchecked' if STATUS['checked'] is None else ('ready' if STATUS['live'] else 'unavailable')}
+
 
 @app.get('/api/observations')
-def observations(ra:float=Query(...,ge=0,le=360),dec:float=Query(...,ge=-90,le=90),fov:float=Query(3,ge=1,le=12),detector:str='D2',limit:int=Query(32,ge=2,le=80),refresh:bool=False):
-    if detector not in ('all','D1','D2','D3','D4','D5','D6'):raise HTTPException(400,'Invalid detector')
-    radius=fov/120 # half field in arcmin -> degrees
-    key=key_for(ra,dec,radius,detector,limit)
-    path=CACHE/f'{key}.json'
-    if path.exists() and not refresh and time.time()-path.stat().st_mtime<CACHE_TTL:
-        import json
-        return json.loads(path.read_text())
-    rows,total,warnings=search(ra,dec,radius,detector,limit)
-    payload={'observations':rows,'total':total,'warnings':warnings,'key':key,'source':'NASA/IPAC IRSA SIA2','real':True,'fov_arcmin':fov,'detector':detector}
-    import json
-    if rows or not warnings:path.write_text(json.dumps(payload))  # never cache a failed search
-    return payload
+def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                 fov: float = Query(3, ge=1, le=12), detector: str = 'D2',
+                 limit: int = Query(24, ge=2, le=64), refresh: bool = False):
+    if detector not in ('all', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6'):
+        raise HTTPException(400, 'Choose a detector from D1 to D6.')
+    key = key_for(ra, dec, fov, detector, limit)
+    path = CACHE / f'{key}.json'
+    if path.exists() and not refresh and time.time() - path.stat().st_mtime < CACHE_TTL:
+        return public_payload(read_search(key))
+    try:
+        # A circle enclosing the square field, in degrees.
+        rows, total, warnings, live, failed = archive.search(ra, dec, fov * math.sqrt(2) / 120, detector, limit)
+    except archive.ArchiveError as exc:
+        with STATE_LOCK:
+            STATUS.update(checked=time.time(), live=[], unavailable={c: str(exc) for c in archive.COLLECTIONS})
+        raise HTTPException(503, str(exc), headers={'Retry-After': '30'})
+    with STATE_LOCK:
+        STATUS.update(checked=time.time(), live=live, unavailable=failed)
+    payload = {'key': key, 'observations': rows, 'total': total, 'warnings': warnings,
+               'source': 'NASA/IPAC IRSA SPHEREx', 'real': True, 'ra': ra, 'dec': dec,
+               'fov_arcmin': fov, 'detector': detector, 'collections': live,
+               'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
+    # Never cache an incomplete response: failed optional collections can recover.
+    if not warnings:
+        write_cache(key, payload)
+    elif rows:
+        write_cache(key, payload)
+        os.utime(path, (0, 0))
+    return public_payload(payload)
 
-def find_url(key,index):
-    import json
-    p=CACHE/f'{key}.json'
-    if not p.exists():raise HTTPException(404,'Search expired. Search again.')
-    data=json.loads(p.read_text())
-    rows=data['observations']
-    if index<0 or index>=len(rows):raise HTTPException(404,'Observation not found')
-    # The URLs are deliberately not persisted in the browser; resolve the exact row again.
-    # SIA2 row ordering is deterministic after sorting by timestamp, band and obs_id.
-    # Cache URLs in a server-side companion file during search instead.
-    q=CACHE/f'{key}.urls.json'
-    if not q.exists():raise HTTPException(404,'Image links unavailable; refresh search')
-    urls=json.loads(q.read_text())
-    return urls[index],rows[index]
 
-# Wrap the search to keep a private URL map, never trust URLs supplied by browsers.
-def search(ra,dec,radius,detector,limit):
-    rows=[];warnings=[]
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures={pool.submit(get_table,ra,dec,radius,c):c for c in live_collections()}
-        for future in as_completed(futures):
-            collection=futures[future]
+def target_wcs(ra, dec, fov):
+    from astropy.wcs import WCS
+    result = WCS(naxis=2)
+    result.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+    result.wcs.crval = [ra, dec]
+    result.wcs.crpix = [(SIZE + 1) / 2, (SIZE + 1) / 2]
+    scale = fov / 60 / SIZE
+    result.wcs.cdelt = [-scale, scale]
+    return result
+
+
+def align_array(data, source_wcs, destination_wcs, size=SIZE):
+    from scipy.ndimage import map_coordinates
+    yy, xx = np.indices((size, size), dtype=float)
+    sky = destination_wcs.pixel_to_world(xx, yy)
+    sx, sy = source_wcs.world_to_pixel(sky)
+    finite = np.isfinite(data)
+    values = map_coordinates(np.where(finite, data, 0.0), [sy, sx], order=1, mode='constant', cval=0.0, prefilter=False)
+    weights = map_coordinates(finite.astype(float), [sy, sx], order=1, mode='constant', cval=0.0, prefilter=False)
+    result = np.full(values.shape, np.nan, dtype=np.float32)
+    np.divide(values, weights, out=result, where=weights > 0.99)
+    return result
+
+
+def image_data(key, index):
+    data = read_search(key)
+    if index < 0 or index >= len(data['observations']):
+        raise HTTPException(404, 'Exposure not found.')
+    row = data['observations'][index]
+    # Include URL: refreshing a query cannot accidentally reuse a different exposure.
+    identity = (key, row['url'])
+    with IMAGE_LOCK:
+        if identity in FRAMES:
+            FRAMES.move_to_end(identity)
+            return FRAMES[identity]
+        from astropy.io import fits
+        from astropy.wcs import WCS
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        raw = archive.fetch_bytes(row['url'], {'center': f"{data['ra']:.8f},{data['dec']:.8f}d",
+                    'size': f"{data['fov_arcmin'] * 1.5 / 60:.8f}"}, timeout=55, max_bytes=40_000_000)
+        with fits.open(io.BytesIO(raw), memmap=False) as hdus:
+            science = next((h for h in hdus if h.name.upper() in ('IMAGE', 'SCI') and h.data is not None and h.data.ndim == 2), None)
+            if science is None:
+                raise archive.ArchiveError('The cutout has no science image.')
+            source_wcs = WCS(science.header, fobj=hdus).celestial
+            if not source_wcs.has_celestial:
+                raise archive.ArchiveError('The cutout has no sky coordinates; it cannot be aligned safely.')
+            grid = target_wcs(data['ra'], data['dec'], data['fov_arcmin'])
+            array = align_array(np.asarray(science.data, dtype=np.float32), source_wcs, grid)
+            info = {'wavelength_um': None, 'flagged_fraction': None, 'version': str(hdus[0].header.get('VERSION', ''))}
+            center = SkyCoord(data['ra'], data['dec'], unit='deg')
             try:
-                for r in future.result():
-                    band=strval(r,'energy_bandpassname')
-                    if detector!='all' and band.upper()!=f'SPHEREX-{detector}':continue
-                    url=strval(r,'access_url')
-                    if not url.startswith('https://irsa.ipac.caltech.edu/'):continue
-                    rows.append({'id':strval(r,'obs_id'),'collection':collection,'band':band,'mjd':floatval(r,'t_min'),'date':mjd_to_iso(floatval(r,'t_min')),'url':url,'em_min':floatval(r,'em_min'),'em_max':floatval(r,'em_max'),'exptime':floatval(r,'t_exptime')})
-            except Exception as e:warnings.append(f'{collection}: {type(e).__name__}: {str(e)[:160]}')
-    rows.sort(key=lambda x:(x['mjd'] if x['mjd'] is not None else 1e12,x['band'],x['id']))
-    total=len(rows)
-    if len(rows)>limit:
-        inds=np.unique(np.linspace(0,len(rows)-1,limit,dtype=int));rows=[rows[int(i)] for i in inds]
-    key=key_for(ra,dec,radius,detector,limit)
-    import json
-    (CACHE/f'{key}.urls.json').write_text(json.dumps([r['url'] for r in rows]))
-    return rows,total,warnings
+                x, y = source_wcs.world_to_pixel(center)
+                spectral = WCS(science.header, fobj=hdus, key='W')
+                spectral.sip = None
+                wavelength, _ = spectral.pixel_to_world(x, y)
+                wave = float(wavelength.to_value(u.um))
+                if math.isfinite(wave):
+                    info['wavelength_um'] = wave
+            except Exception:
+                pass  # Do not invent wavelengths for products without usable spectral WCS.
+            if 'FLAGS' in hdus and hdus['FLAGS'].data is not None:
+                flags = hdus['FLAGS']
+                if flags.data.shape == science.data.shape:
+                    from scipy.ndimage import map_coordinates
+                    yy, xx = np.indices((SIZE, SIZE), dtype=float)
+                    sx, sy = source_wcs.world_to_pixel(grid.pixel_to_world(xx, yy))
+                    mask = map_coordinates((flags.data != 0).astype(float), [sy, sx], order=0, mode='constant', cval=np.nan)
+                    valid = np.isfinite(mask) & np.isfinite(array)
+                    if np.any(valid):
+                        info['flagged_fraction'] = float(mask[valid].mean())
+        if np.isfinite(array).sum() < 20:
+            raise archive.ArchiveError('This exposure does not cover enough of the selected patch. Try another frame.')
+        result = (array, row, grid, info)
+        FRAMES[identity] = result
+        while len(FRAMES) > 48:
+            FRAMES.popitem(last=False)
+        return result
 
-def _image_data_raw(key,index,ra,dec,fov):
-    url,meta=find_url(key,index)
-    # IRSA IBE cutout API: append center and size query to a vetted IRSA access URL.
-    # Retrieve only a small cutout rather than multi-hundred-MB full-frame files.
-    params={'center':f'{ra:.7f},{dec:.7f}d','size':f'{fov/60:.7f}'}
-    r=SESS.get(url,params=params,timeout=100)
-    r.raise_for_status()
-    if len(r.content)>40_000_000:raise ValueError('Cutout too large; choose a smaller field')
-    with fits.open(io.BytesIO(r.content),memmap=False,ignore_missing_simple=True) as hdul:
-        candidates=[]
-        for h in hdul:
-            if h.data is not None and getattr(h.data,'ndim',0)==2 and h.data.size>100:
-                name=h.name.upper()
-                rank=0 if name in ('IMAGE','SCI','PRIMARY') else 1
-                candidates.append((rank,h))
-        if not candidates:raise ValueError('No 2D image data in FITS cutout')
-        h=sorted(candidates,key=lambda x:x[0])[0][1]
-        data=np.array(h.data,dtype=np.float32)
-        try:
-            wcs=WCS(h.header).celestial
-            target=SkyCoord(ra,dec,unit='deg')
-            cut=Cutout2D(data,target,(min(128,data.shape[0]),min(128,data.shape[1])),wcs=wcs,mode='partial',fill_value=np.nan)
-            data=cut.data;_WCS[(key,index)]=cut.wcs
-        except Exception:pass
-    return data,meta
+
+def get_image(key, index):
+    try:
+        return image_data(key, index)
+    except HTTPException:
+        raise
+    except archive.ArchiveError as exc:
+        raise HTTPException(502, str(exc))
+    except Exception:
+        raise HTTPException(502, 'The SPHEREx cutout could not be processed. Retry this frame or select another exposure.')
+
 
 @app.get('/api/frame/{key}/{index}.png')
-def frame(key:str,index:int,ra:float=Query(...,ge=0,le=360),dec:float=Query(...,ge=-90,le=90),fov:float=Query(3,ge=1,le=12)):
-    if not (len(key)==24 and all(c in '0123456789abcdef' for c in key)):raise HTTPException(400,'Invalid key')
-    try:
-        data,_=image_data(key,index,ra,dec,fov)
-        good=data[np.isfinite(data)]
-        if good.size<20:raise ValueError('No valid pixels')
-        low,high=np.percentile(good,[5,99.5]); high=max(high,low+1e-8)
-        arr=np.clip((np.nan_to_num(data,nan=low)-low)/(high-low),0,1)
-        arr=np.uint8(np.sqrt(arr)*255)
-        buf=io.BytesIO();Image.fromarray(arr,mode='L').resize((512,512)).save(buf,format='PNG')
-        return Response(buf.getvalue(),media_type='image/png',headers={'Cache-Control':'public, max-age=86400'})
-    except HTTPException:raise
-    except Exception as e:raise HTTPException(502,f'NASA image retrieval/processing failed: {str(e)[:200]}')
+def frame(key: str, index: int):
+    array, _, _, _ = get_image(key, index)
+    valid = array[np.isfinite(array)]
+    low, high = np.percentile(valid, [5, 99.5])
+    high = max(high, low + 1e-8)
+    intensity = np.clip((np.nan_to_num(array, nan=low) - low) / (high - low), 0, 1)
+    # FITS y increases upward. Flip PNG so north remains at the top.
+    gray = np.flipud(np.uint8(np.sqrt(intensity) * 255))
+    buffer = io.BytesIO()
+    Image.fromarray(gray).save(buffer, format='PNG')
+    return Response(buffer.getvalue(), media_type='image/png', headers={'Cache-Control': 'no-store'})
 
-@app.get('/api/photometry/{key}')
-def photometry(key:str,ra:float=Query(...,ge=0,le=360),dec:float=Query(...,ge=-90,le=90),fov:float=Query(3,ge=1,le=12),max_frames:int=Query(18,ge=2,le=32)):
-    import json
-    p=CACHE/f'{key}.json'
-    if not p.exists():raise HTTPException(404,'Run a search first')
-    observations=json.loads(p.read_text())['observations']
-    indices=np.unique(np.linspace(0,len(observations)-1,min(max_frames,len(observations)),dtype=int))
-    results=[]
-    for i in indices:
-        try:
-            data,meta=image_data(key,int(i),ra,dec,fov)
-            # A simple *uncalibrated* central aperture proxy; not a scientific light curve.
-            yy,xx=np.indices(data.shape);cy,cx=(np.array(data.shape)-1)/2
-            rr=np.hypot(xx-cx,yy-cy)
-            annulus=data[(rr>=9)&(rr<=15)&np.isfinite(data)]
-            aperture=data[(rr<=4)&np.isfinite(data)]
-            if len(annulus)<10 or len(aperture)<10:continue
-            background=float(np.median(annulus))
-            proxy=float(np.sum(aperture-background))
-            results.append({'index':int(i),'date':meta['date'],'band':meta['band'],'proxy':proxy,'background':background})
-        except Exception as e:results.append({'index':int(i),'date':observations[int(i)]['date'],'error':str(e)[:100]})
-    return {'measurements':results,'type':'uncalibrated_aperture_proxy','warning':'Exploratory central-pixel aperture only; not calibrated photometry. SPHEREx has a wavelength gradient across the detector. Compare only compatible wavelength, geometry, and quality observations.'}
 
-_WCS={};_FR={};_GAIA={}
-def image_data(key,index,ra,dec,fov):
-    k=(key,index,round(ra,5),round(dec,5),fov)
-    if k not in _FR:
-        if len(_FR)>80:_FR.pop(next(iter(_FR)))
-        _FR[k]=_image_data_raw(key,index,ra,dec,fov)  # frame + overlay share one IRSA fetch
-    return _FR[k]
+@app.get('/api/frame-info/{key}/{index}')
+def frame_info(key: str, index: int):
+    array, row, _, info = get_image(key, index)
+    return {**{k: v for k, v in row.items() if k != 'url'}, **info,
+            'coverage': float(np.isfinite(array).mean()), 'stretch': 'Independent 5–99.5 percentile square-root stretch.'}
 
-def gaia_stars(ra,dec,radius):
-    k=(round(ra,4),round(dec,4),round(radius,5))
-    if k not in _GAIA:
-        q=f"SELECT TOP 300 source_id,ra,dec,pmra,pmdec,phot_g_mean_mag FROM gaiadr3.gaia_source WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra:.6f},{dec:.6f},{radius:.6f})) ORDER BY phot_g_mean_mag"
-        r=SESS.post('https://gea.esac.esa.int/tap-server/tap/sync',data={'REQUEST':'doQuery','LANG':'ADQL','FORMAT':'json','QUERY':q},timeout=60);r.raise_for_status()
-        j=r.json();cols=[m['name'] for m in j['metadata']];_GAIA[k]=[dict(zip(cols,x)) for x in j['data']]
-    return _GAIA[k]
 
-@app.get('/api/resolve')
-def resolve(q:str=Query(...,min_length=2,max_length=80)):
-    """Name (SIMBAD/NED via CDS), decimal degrees, or sexagesimal -> RA/Dec in degrees."""
-    q=q.strip()
-    try:
-        if re.fullmatch(r'[-+]?\d+(\.\d+)?[\s,]+[-+]?\d+(\.\d+)?',q):
-            a,d=[float(x) for x in re.split(r'[\s,]+',q)];c=SkyCoord(a,d,unit='deg')
-        elif re.fullmatch(r'[\d\s:.+\-hmsd,]+',q):c=SkyCoord(q.replace(',',' '),unit=(u.hourangle,u.deg))
-        else:c=SkyCoord.from_name(q)
-        return {'ra':round(float(c.ra.deg),6),'dec':round(float(c.dec.deg),6),'query':q}
-    except Exception:raise HTTPException(404,f'Could not resolve "{q}". Try a SIMBAD name or coordinates.')
+def gaia_stars(ra, dec, radius):
+    key = (ra, dec, radius)
+    with STATE_LOCK:
+        if key in GAIA:
+            return GAIA[key]
+    query = ("SELECT TOP 300 source_id,ra,dec,pmra,pmdec,phot_g_mean_mag FROM gaiadr3.gaia_source "
+             f"WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra:.8f},{dec:.8f},{radius:.8f})) "
+             "ORDER BY phot_g_mean_mag")
+    raw = archive.fetch_bytes('https://gea.esac.esa.int/tap-server/tap/sync',
+            {'REQUEST': 'doQuery', 'LANG': 'ADQL', 'FORMAT': 'json', 'QUERY': query}, timeout=30)
+    payload = json.loads(raw)
+    columns = [m['name'] for m in payload['metadata']]
+    stars = [dict(zip(columns, row)) for row in payload['data']]
+    with STATE_LOCK:
+        GAIA[key] = stars
+        while len(GAIA) > 24:
+            GAIA.popitem(last=False)
+    return stars
+
 
 @app.get('/api/overlay/{key}/{index}.json')
-def overlay(key:str,index:int,ra:float=Query(...,ge=0,le=360),dec:float=Query(...,ge=-90,le=90),fov:float=Query(3,ge=1,le=12)):
-    """Gaia DR3 sources, proper-motion propagated from J2016.0 to this exposure, in the frame's own WCS."""
-    if not (len(key)==24 and all(c in '0123456789abcdef' for c in key)):raise HTTPException(400,'Invalid key')
+def overlay(key: str, index: int):
+    data = read_search(key)
+    _, row, grid, _ = get_image(key, index)
+    from astropy.coordinates import SkyCoord
+    stars = []
+    # Gaia DR3 reference epoch is J2016.0, JD 2457389.0 / MJD 57388.5.
+    dt = ((row['mjd'] if row['mjd'] is not None else 57388.5) - 57388.5) / 365.25
     try:
-        data,meta=image_data(key,index,ra,dec,fov);wcs=_WCS.get((key,index))
-        if wcs is None:return {'stars':[],'note':'Frame has no usable WCS; overlay unavailable.'}
-        h,w=data.shape;dt=((meta.get('mjd') or 57388.0)-57388.0)/365.25;out=[]
-        for st in gaia_stars(ra,dec,fov/120+0.05):  # margin so fast movers still land in frame
-            pa=st['pmra'] or 0;pd=st['pmdec'] or 0
-            d=st['dec']+pd*dt/3.6e6;a=st['ra']+pa*dt/3.6e6/max(math.cos(math.radians(st['dec'])),1e-6)
-            x,y=wcs.world_to_pixel(SkyCoord(a,d,unit='deg'))
-            if -0.5<=x<w-0.5 and -0.5<=y<h-0.5:out.append({'x':float(x+.5)/w,'y':float(y+.5)/h,'g':st['phot_g_mean_mag'],'pm':math.hypot(pa,pd),'id':str(st['source_id'])})
-        return {'stars':out,'mjd':meta.get('mjd'),'source':'Gaia DR3 (ESA), propagated by proper motion'}
-    except HTTPException:raise
-    except Exception as e:raise HTTPException(502,f'Gaia overlay failed: {str(e)[:160]}')
+        for star in gaia_stars(data['ra'], data['dec'], data['fov_arcmin'] * math.sqrt(2) / 120 + .05):
+            pmra, pmdec = star['pmra'] or 0, star['pmdec'] or 0
+            dec = star['dec'] + pmdec * dt / 3.6e6
+            ra = star['ra'] + pmra * dt / (3.6e6 * max(math.cos(math.radians(star['dec'])), 1e-6))
+            if not -90 <= dec <= 90:
+                continue
+            x, y = grid.world_to_pixel(SkyCoord(ra, dec, unit='deg'))
+            if -.5 <= x < SIZE - .5 and -.5 <= y < SIZE - .5:
+                stars.append({'x': float(x + .5) / SIZE, 'y': 1 - float(y + .5) / SIZE,
+                              'id': str(star['source_id']), 'g': star['phot_g_mean_mag'], 'pm': math.hypot(pmra, pmdec)})
+        return {'stars': stars, 'source': 'Gaia DR3; linear proper motion from J2016.0 (no parallax correction).'}
+    except Exception:
+        raise HTTPException(502, 'Gaia is not responding. SPHEREx playback is still available.')
 
-ASSETS={'style.css','app.js','react.production.min.js','react-dom.production.min.js','htm.js'}
+
+@app.get('/api/photometry/{key}')
+def photometry(key: str, max_frames: int = Query(12, ge=2, le=18)):
+    data = read_search(key)
+    n = len(data['observations'])
+    indices = sorted(set(round(i * (n - 1) / max(1, min(max_frames, n) - 1)) for i in range(min(max_frames, n))))
+    results = []
+    # Constant angular aperture across FoVs. These are exploratory values, not calibrated photometry.
+    scale = data['fov_arcmin'] * 60 / SIZE
+    yy, xx = np.indices((SIZE, SIZE))
+    radius = np.hypot(xx - (SIZE - 1) / 2, yy - (SIZE - 1) / 2) * scale
+    for i in indices:
+        try:
+            array, row, _, info = image_data(key, i)
+            aperture = array[(radius <= 12) & np.isfinite(array)]
+            annulus = array[(radius >= 24) & (radius <= 36) & np.isfinite(array)]
+            if aperture.size < 3 or annulus.size < 10:
+                continue
+            proxy = float(np.mean(aperture) - np.median(annulus))
+            results.append({'index': i, 'date': row['date'], 'proxy': proxy, 'band': row['band'], 'wavelength_um': info['wavelength_um']})
+        except Exception:
+            results.append({'index': i, 'error': 'Frame unavailable.'})
+    return {'measurements': results, 'warning': 'Exploratory fixed-position brightness proxy. Wavelength, flags, PSF, and source motion can change it; this is not calibrated light-curve photometry.'}
+
+
+@app.get('/api/resolve')
+def resolve(q: str = Query(..., min_length=2, max_length=100)):
+    q = q.strip()
+    try:
+        if re.fullmatch(r'[-+]?\d+(?:\.\d+)?[\s,]+[-+]?\d+(?:\.\d+)?', q):
+            ra, dec = map(float, re.split(r'[\s,]+', q))
+            if not 0 <= ra < 360 or not -90 <= dec <= 90:
+                raise HTTPException(400, 'RA must be 0–359.999° and Dec must be −90–90°.')
+        elif re.fullmatch(r'[\d\s:.+\-hmsd,]+', q):
+            from astropy.coordinates import SkyCoord
+            import astropy.units as u
+            coord = SkyCoord(q.replace(',', ' '), unit=(u.hourangle, u.deg))
+            ra, dec = float(coord.ra.deg), float(coord.dec.deg)
+        else:
+            raw = archive.fetch_bytes('https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/SNV?' + quote(q, safe=''), timeout=15, max_bytes=1_000_000)
+            root = ET.fromstring(raw)
+            resolver = next((r for r in root.iter('Resolver') if r.find('jradeg') is not None and r.find('jdedeg') is not None), None)
+            if resolver is None:
+                raise ValueError('No match')
+            ra, dec = float(resolver.findtext('jradeg')), float(resolver.findtext('jdedeg'))
+        return {'ra': round(ra, 7), 'dec': round(dec, 7), 'query': q}
+    except HTTPException:
+        raise
+    except archive.ArchiveError:
+        raise HTTPException(503, 'Name lookup is unavailable. Enter RA and Dec or choose a suggested target.')
+    except Exception:
+        raise HTTPException(404, 'Target not found. Try a SIMBAD name or coordinates such as 133.79513, -7.24515.')
+
+ASSETS = {'app.js', 'style.css', 'react.production.min.js', 'react-dom.production.min.js', 'htm.js'}
+
 @app.get('/static/{name}')
 @app.get('/static/vendor/{name}')
-def asset(name:str):
-    if name not in ASSETS:raise HTTPException(404,'Not found')  # only whitelisted front-end files are public
-    return FileResponse(ROOT/name)
+def asset(name: str):
+    if name not in ASSETS:
+        raise HTTPException(404, 'Not found')
+    return FileResponse(ROOT / name, headers={'Cache-Control': 'no-cache'})
 
 @app.get('/')
-def home():return FileResponse(ROOT/'index.html')
+def home():
+    return FileResponse(ROOT / 'index.html', headers={'Cache-Control': 'no-cache'})

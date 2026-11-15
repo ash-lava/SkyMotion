@@ -1,0 +1,130 @@
+SKYMOTION — UPDATE YOUR EXISTING GITHUB + RENDER APP
+
+You do not need a new repository, a new Render service, npm, or an API key.
+The app is React + a Python API, and keeps the same flat file layout.
+
+1. UNZIP THE DOWNLOAD
+   Extract SkyMotion-update.zip on your computer.
+   Open the extracted folder. You should see server.py, archive_client.py,
+   app.js, index.html, style.css, requirements.txt, and the other files.
+
+2. OPEN THE RIGHT GITHUB FOLDER
+   Open the GitHub repository already connected to your Render service.
+   Select the branch Render deploys (usually main).
+   Open the folder containing your current server.py and requirements.txt.
+   If the existing app is at the top level, stay at the top level.
+
+3. UPLOAD THE FILES
+   Click Add file > Upload files.
+   Drag ALL the extracted files into the upload area.
+   Upload the FILES INSIDE the folder, not the ZIP or its outer folder.
+   Files with the same names replace their old versions.
+   Make sure archive_client.py and test_server.py are included: they are new.
+   Keep the supplied React, ReactDOM, and htm files beside server.py.
+   You do not need to delete the existing repository first.
+
+4. SAVE THE CHANGE
+   Commit message: Refresh SkyMotion UI and repair SPHEREx archive handling
+   Commit to the branch connected to Render if GitHub allows it.
+   If GitHub requires a new branch, create a pull request and merge it into
+   Render's connected branch. Render must see the merged commit.
+
+5. FIX THE RENDER ENVIRONMENT SETTING
+   Open Render Dashboard > your existing SkyMotion service > Environment.
+   Add or edit this variable:
+
+   Key:   SPHEREX_COLLECTIONS
+   Value: spherex_dr1
+
+   Replace any old comma-separated QR/QR2/QR_DEEP value.
+   Do not paste quotes around the value.
+   Use the dashboard's save/redeploy action.
+   Editing render.yaml alone might not update a manually created service.
+
+6. CHECK THE RENDER COMMANDS
+   Open the service's Settings. Use:
+
+   Build Command:
+   pip install -r requirements.txt && python -m unittest -q test_server.py
+
+   Start Command:
+   uvicorn server:app --host 0.0.0.0 --port $PORT
+
+   Health Check Path:
+   /api/health
+
+   Keep the existing Root Directory if server.py is already inside it.
+   Otherwise, leave Root Directory empty when the app is at the repo root.
+   Keep an existing supported Python 3.12 runtime; render.yaml specifies 3.12.8
+   for new Blueprint services. No frontend build command is needed.
+
+   The build runs the Python tests after installing Astropy, so the astronomy
+   tests that could not run in the editing workspace are checked on Render.
+
+7. DEPLOY
+   If auto-deploy is on, Render starts after your commit or merge.
+   Otherwise select Manual Deploy > Deploy latest commit.
+   Wait for the deploy to finish. Check the log if it fails.
+   If it says "No module named archive_client", upload archive_client.py.
+   If it cannot find test_server.py, upload that file beside server.py.
+
+8. REFRESH YOUR SITE
+   Visit https://skymotion-sk2p.onrender.com
+   Hard refresh: Ctrl+Shift+R on Windows/Linux, Cmd+Shift+R on Mac.
+   The homepage should show the black-and-gold SkyMotion interface.
+
+9. QUICK CHECK
+   Open https://skymotion-sk2p.onrender.com/api/health
+   Look for version "2.0.0" and collections ["spherex_dr1"].
+
+   In the app, choose Barnard's Star, then Load SPHEREx exposures.
+   Its wider preset includes room for its large proper motion.
+   Try all five challenge targets; they may not all have usable exposures
+   in each detector/release. A valid empty result is different from an outage.
+   Try D1–D6 if a target has no D2 coverage.
+   After images load, use Play, Previous, Next, and the timeline slider.
+   Switch back to Sky atlas and try DSS, 2MASS, and WISE using the layer menu.
+   On a phone, use the menu at top right to open the target controls.
+   Use Exposure notes & Gaia below the image for compact-screen metadata.
+
+   /api/archive starts as "unchecked" until a real search runs.
+   That is expected. It no longer sends speculative collection probes.
+
+WHAT THE ORIGINAL JSON MEANT
+
+"live": ["spherex_dr1"] means DR1 answered. It is not a total app crash.
+The other collection requests returned upstream HTTP 502 errors.
+The old code probed historical/incorrect names as well as optional releases.
+QR3 is a documented collection, so its 502 does not prove it is invalid.
+This update starts with the responding DR1 collection, retries transient
+failures, and distinguishes service failures from a genuine empty result.
+It cannot prevent a real outage at NASA/IPAC or CDS.
+
+THE COLORS
+
+The atlas uses real telescope color composites from DSS, 2MASS, and WISE.
+These surveys supply the stars, nebulae, and galaxies; no decorative star
+field or AI-generated sky is substituted for observations.
+SPHEREx time-series frames are grayscale near-infrared science images.
+The app labels the two views separately.
+
+IF SOMETHING STILL DOES NOT LOAD
+
+- Old purple interface: check the deployed commit, then hard refresh.
+- Import/build error: confirm all files and requirements.txt were replaced.
+- Archive unavailable: use Retry archive after a short interval. A deployment
+  cannot force IRSA to be online. The map is independent of the SPHEREx API.
+- No matching exposures: try a different detector or target. No fake frames
+  are supplied to make an empty field look successful.
+- Sky map unavailable: allow aladin.cds.unistra.fr and survey tile requests
+  in browser/privacy extensions. Aladin v3 also needs WebGL support.
+- First request is slow: allow time for Render startup and archive responses.
+
+VALIDATION STATUS
+
+The editing workspace passed 22 Python API/archive tests and 10 React/htm
+state tests. Three additional Astropy tests are included but could not run
+there because Astropy could not be installed. Browser rendering and direct
+requests to Render/IRSA/CDS were also restricted in that workspace.
+The build command runs all Python tests on Render after dependencies install.
+Complete the live checks above before presenting this as fully validated.

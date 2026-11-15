@@ -1,77 +1,272 @@
-const {useState,useEffect}=React,html=htm.bind(React.createElement);
-const TARGETS=[['WISE 0855',133.79513,-7.24515,'coldest known brown dwarf, fast mover'],['Barnard’s Star',269.4521,4.6934,'high proper motion'],['Epsilon Indi B',330.84,-56.78,'brown dwarf pair'],['RW Aurigae',76.95,30.4,'variable star'],['R Draconis',248.17,66.755,'variable star']];
-const api=async u=>{const r=await fetch(u);let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||`Request failed (${r.status})`);return d};
-const day=d=>d?d.slice(0,10):'unknown';
-const mjdYear=m=>new Date((m-40587)*864e5).getUTCFullYear();
-const jan1=y=>Date.UTC(y,0,1)/864e5+40587;
-
-function Plate({src,fov,stars,onLoad,onError}){
-  const t=[];for(let k=0;k<=20;k++){const L=k%5?1.6:3.4,p=k*5;t.push(html`<path key=${k} vectorEffect="non-scaling-stroke" d=${`M${p} 0v${L}M${p} 100v${-L}M0 ${p}h${L}M100 ${p}h${-L}`}/>`)}
-  return html`<div className="plate" role="img" aria-label="SPHEREx cutout">
-    ${src?html`<img src=${src} alt="" onLoad=${onLoad} onError=${onError}/>`:html`<div className="none">The plate is empty.<br/>Find a target to pull real exposures.</div>`}
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none"><g stroke="#d3d5e4" strokeWidth="1" fill="none" opacity=".75">${t}</g>
-      <g stroke="#d3d5e4" strokeWidth="1.2" vectorEffect="non-scaling-stroke"><path d="M50 44v4M50 52v4M44 50h4M52 50h4" vectorEffect="non-scaling-stroke"/></g>
-      ${(stars?.stars||[]).map(s=>{const fast=s.pm>100;return html`<ellipse key=${s.id} cx=${s.x*100} cy=${s.y*100} rx=${Math.max(1.1,3.3-((s.g??18)-8)*.17)} ry=${Math.max(1.1,3.3-((s.g??18)-8)*.17)} fill="none" stroke=${fast?'#ffcb78':'#d3d5e4'} strokeWidth="1.4" strokeDasharray=${fast?'4 3':''} vectorEffect="non-scaling-stroke"/>`})}
-    </svg></div>`;
+/* SkyMotion / React 18 + htm. No Node build required. */
+const {useState, useEffect, useRef} = React;
+const html = htm.bind(React.createElement);
+const ICONS = {
+  search: 'M21 21l-5-5M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15',
+  arrow: 'M5 12h14M13 6l6 6-6 6', plus: 'M12 5v14M5 12h14', minus: 'M5 12h14',
+  cross: 'M6 6l12 12M6 18L18 6', target: 'M12 2v4M12 18v4M2 12h4M18 12h4M19 12a7 7 0 1 0-14 0 7 7 0 0 0 14 0',
+  layers: 'M12 3L2 8l10 5 10-5-10-5M2 12l10 5 10-5M2 16l10 5 10-5',
+  share: 'M10 14l4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',
+  info: 'M12 11v6M12 7h.01M22 12a10 10 0 1 0-20 0 10 10 0 0 0 20 0',
+  back: 'M6 5v14M18 5l-9 7 9 7V5', next: 'M18 5v14M6 5l9 7-9 7V5',
+  play: 'M8 4l12 8-12 8V4', pause: 'M8 5v14M16 5v14',
+  refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2',
+  grid: 'M3 3h18v18H3V3M3 9h18M3 15h18M9 3v18M15 3v18',
+  menu: 'M4 6h16M4 12h16M4 18h16', star: 'M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2',
+  download: 'M12 3v12M7 10l5 5 5-5M4 16v5h16v-5'
+};
+function Icon({name, size=18}) {
+  return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d=${ICONS[name] || ICONS.star}/></svg>`;
 }
+const TARGETS = [
+  {name: 'Barnard’s Star', ra:269.4521, dec:4.6934, type:'High proper motion', tag:'01', fov:12},
+  {name: 'Epsilon Indi B', ra:331.0441466, dec:-56.7828442, type:'Brown dwarf pair', tag:'02', fov:6},
+  {name: 'WISE 0855', ra:133.7951292, dec:-7.2451472, type:'Cold brown dwarf', tag:'03', fov:12},
+  {name: 'RW Aurigae', ra:76.9565260, dec:30.4014382, type:'Variable star', tag:'04'},
+  {name: 'R Draconis', ra:248.1676075, dec:66.7549842, type:'Variable star', tag:'05'}
+];
+const ORION = {name:'Orion Nebula', ra:83.82208, dec:-5.39111, type:'A place to start', tag:'M42'};
+const SURVEYS = {
+  dss: {id:'P/DSS2/color', label:'DSS · Optical color', short:'DSS2 color', credit:'DSS / STScI · CDS Aladin'},
+  mass: {id:'P/2MASS/color', label:'2MASS · Near-infrared', short:'2MASS infrared', credit:'2MASS / UMass / IPAC · CDS Aladin'},
+  wise: {id:'P/allWISE/color', label:'WISE · Infrared color', short:'AllWISE infrared', credit:'WISE / NASA / JPL / UCLA · CDS Aladin'}
+};
+const DETECTORS = {D1:'0.75–1.1 µm',D2:'1.1–1.6 µm',D3:'1.6–2.4 µm',D4:'2.4–3.8 µm',D5:'3.8–4.4 µm',D6:'4.4–5.0 µm'};
+const date = d => d ? new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}) : 'Date unavailable';
+const coords = t => `${t.ra.toFixed(5)}°, ${t.dec >= 0 ? '+' : ''}${t.dec.toFixed(5)}°`;
+async function api(url, signal) {
+  const response = await fetch(url, {signal});
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `Request failed (${response.status}). Please retry.`);
+  return payload;
+}
+function initialState() {
+  const p = new URLSearchParams(location.search), ra = Number(p.get('ra')), dec = Number(p.get('dec'));
+  const valid = p.has('ra') && p.has('dec') && Number.isFinite(ra) && Number.isFinite(dec) && ra>=0 && ra<360 && dec>=-90 && dec<=90;
+  return {target:valid ? {name:'Selected sky patch',ra,dec,type:'Shared coordinates'} : ORION,
+    fov:[1,2,3,6,12].includes(+p.get('fov')) ? +p.get('fov') : 3,
+    band:DETECTORS[p.get('band')] ? p.get('band') : 'D2',
+    survey:SURVEYS[p.get('layer')] ? p.get('layer') : 'dss', auto:valid && p.get('mode')==='sequence'};
+}
+let aladinPromise;
+function loadAladin() {
+  if (!aladinPromise) aladinPromise = new Promise((resolve,reject) => {
+    if (window.A) { Promise.resolve(A.init).then(resolve,reject); return; }
+    const script = document.createElement('script');
+    script.src='https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js';
+    script.async=true;
+    script.onload=()=>window.A ? Promise.resolve(A.init).then(resolve,reject) : reject(Error('Sky engine unavailable'));
+    script.onerror=()=>reject(Error('Sky engine unavailable'));
+    document.head.appendChild(script);
+  });
+  return aladinPromise;
+}
+function SkyMap({mapRef,target,survey,onCenter,onState}) {
+  const targetRef=useRef(target), surveyRef=useRef(survey);
+  targetRef.current=target; surveyRef.current=survey;
+  useEffect(()=>{
+    let cancelled=false;
+    const timeout=setTimeout(()=>{if(!cancelled && !mapRef.current) onState('slow');},18000);
+    loadAladin().then(()=>{
+      if(cancelled) return;
+      const t=targetRef.current;
+      const map=A.aladin('#sky-map',{survey:SURVEYS[surveyRef.current].id,target:`${t.ra} ${t.dec}`,fov:t===ORION?1.4:.35,
+        cooFrame:'ICRSd',showReticle:true,reticleColor:'#dfcb94',reticleSize:25,showZoomControl:false,showFullscreenControl:false,
+        showLayersControl:false,showGotoControl:false,showShareControl:false,showFrame:false,
+        showProjectionControl:false,showSimbadPointerControl:false,showContextMenu:false,
+        showCooGridControl:false,showSettingsControl:false,showStatusBar:false});
+      mapRef.current=map;
+      map.on('positionChanged',({ra,dec})=>onCenter({ra,dec}));
+      onCenter({ra:t.ra,dec:t.dec}); onState('ready'); clearTimeout(timeout);
+    }).catch(()=>{if(!cancelled){onState('error');clearTimeout(timeout);}});
+    return()=>{cancelled=true;clearTimeout(timeout);};
+  },[]);
+  useEffect(()=>{if(mapRef.current){mapRef.current.gotoRaDec(target.ra,target.dec);mapRef.current.setFoV(target===ORION ? 1.4 : .35);}},[target]);
+  useEffect(()=>{if(mapRef.current) mapRef.current.setBaseImageLayer(SURVEYS[survey].id);},[survey]);
+  return html`<div id="sky-map" role="region" aria-label="Interactive sky map. Drag to pan and scroll to zoom."/>`;
+}
+function Modal({title,onClose,children}) {
+  const ref=useRef();
+  useEffect(()=>{const before=document.activeElement;ref.current.showModal();return()=>{ref.current?.close();before?.focus();};},[]);
+  return html`<dialog ref=${ref} className="modal" onCancel=${onClose} onClick=${e=>{if(e.target===ref.current)onClose();}}>
+    <div className="modal-head"><h2>${title}</h2><button className="icon-button" aria-label="Close dialog" onClick=${onClose}><${Icon} name="cross"/></button></div>${children}
+  </dialog>`;
+}
+function App() {
+  const [initial]=useState(initialState);
+  const [target,setTarget]=useState(initial.target),[query,setQuery]=useState(''),[fov,setFov]=useState(initial.fov),[band,setBand]=useState(initial.band);
+  const [raInput,setRaInput]=useState(initial.target.ra.toFixed(6)),[decInput,setDecInput]=useState(initial.target.dec.toFixed(6));
+  const [center,setCenter]=useState(initial.target),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading');
+  const [panel,setPanel]=useState(false),[about,setAbout]=useState(false),[grid,setGrid]=useState(false),[toast,setToast]=useState('');
+  const [mode,setMode]=useState('atlas'),[busy,setBusy]=useState(false),[resolving,setResolving]=useState(false),[status,setStatus]=useState(null);
+  const [data,setData]=useState(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1000);
+  const [frame,setFrame]=useState(null),[frameError,setFrameError]=useState(''),[frameBusy,setFrameBusy]=useState(false),[retry,setRetry]=useState(0),[ready,setReady]=useState(-1);
+  const [info,setInfo]=useState(null),[gaia,setGaia]=useState(false),[stars,setStars]=useState(null),[gaiaError,setGaiaError]=useState('');
+  const [phot,setPhot]=useState(null),[measuring,setMeasuring]=useState(false),[photOpen,setPhotOpen]=useState(false),[notesOpen,setNotesOpen]=useState(false);
+  const mapRef=useRef(null), searchRef=useRef(null), resolveRef=useRef(null), blobs=useRef(new Map()), photoRef=useRef(null);
+  const obs=data?.observations || [], o=obs[index], frameMatches=frame?.index===index && frame?.key===data?.key;
+  const selectedMoved = Math.abs(center.ra-target.ra)>.0001 || Math.abs(center.dec-target.dec)>.0001;
 
-function App(){
-  const [q,setQ]=useState(''),[fov,setFov]=useState(3),[band,setBand]=useState('D2'),[view,setView]=useState(null),[obs,setObs]=useState([]),[key,setKey]=useState(''),[total,setTotal]=useState(0),[i,setI]=useState(0);
-  const [msg,setMsg]=useState({t:'Name a star or enter coordinates, for example 08h55m10.8s -07d14m42s.'}),[busy,setBusy]=useState(false),[play,setPlay]=useState(false),[speed,setSpeed]=useState(900),[shown,setShown]=useState(-1),[gaia,setGaia]=useState(false),[stars,setStars]=useState(null),[phot,setPhot]=useState([]);
-  const qs=v=>new URLSearchParams({ra:v.ra,dec:v.dec,fov:v.fov}).toString();
-  const frame=k=>view&&key?`/api/frame/${key}/${k}.png?${qs(view)}`:'';
-
-  async function search(ra,dec,f=fov,b=band){
-    setBusy(true);setPlay(false);setPhot([]);setStars(null);setShown(-1);setMsg({t:'Asking the archive which exposures cover this patch…'});
-    try{const d=await api('/api/observations?'+new URLSearchParams({ra,dec,fov:f,detector:b,limit:32}));
-      setView({ra,dec,fov:f,band:b});setObs(d.observations);setKey(d.key);setTotal(d.total);setI(0);
-      setMsg(d.observations.length?{t:`${d.total} exposures cover this patch. Showing ${d.observations.length}, spread across the survey.${d.warnings.length?` ${d.warnings.length} archive collection(s) did not answer.`:''}`}:{t:'No exposures here. Try another detector, or open the field wider.',bad:true});
-      history.replaceState(null,'',`?ra=${ra}&dec=${dec}&fov=${f}&band=${b}`);
-    }catch(e){setMsg({t:e.message,bad:true})}finally{setBusy(false)}
+  function clearSequence() {
+    searchRef.current?.abort(); photoRef.current?.abort();
+    setBusy(false);setPlaying(false);setData(null);setFrame(null);setInfo(null);setStars(null);setPhot(null);setPhotOpen(false);setNotesOpen(false);setMeasuring(false);setStatus(null);setMode('atlas');setFrameError('');
+    blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();
   }
-  async function locate(e){e&&e.preventDefault();const text=q.trim();if(!text)return;setBusy(true);setMsg({t:`Looking up “${text}”…`});
-    try{const d=await api('/api/resolve?q='+encodeURIComponent(text));await search(d.ra,d.dec)}catch(x){setMsg({t:x.message,bad:true});setBusy(false)}}
-  const pick=t=>{setQ(t[0]);search(t[1],t[2])};
-  useEffect(()=>{const p=new URLSearchParams(location.search);if(p.has('ra')&&p.has('dec')){const f=+p.get('fov')||3,b=p.get('band')||'D2';setFov(f);setBand(b);search(+p.get('ra'),+p.get('dec'),f,b)}},[]);
-  // Playback waits for the current frame to load, so slow archive fetches never flicker.
-  useEffect(()=>{if(!play||shown!==i||!obs.length)return;const t=setTimeout(()=>setI(x=>(x+1)%obs.length),speed);return()=>clearTimeout(t)},[play,shown,i,speed,obs.length]);
-  useEffect(()=>{if(!gaia||!key||!view){setStars(null);return}let off=false;api(`/api/overlay/${key}/${i}.json?${qs(view)}`).then(d=>!off&&setStars(d)).catch(e=>!off&&setStars({stars:[],note:e.message}));return()=>{off=true}},[gaia,key,i,view]);
-  async function measure(){setBusy(true);setMsg({t:'Measuring up to 18 frames. Each is read from the archive, so this can take minutes.'});
-    try{const d=await api(`/api/photometry/${key}?${qs(view)}&max_frames=18`);setPhot(d.measurements.filter(m=>Number.isFinite(m.proxy)));setMsg({t:d.warning})}catch(e){setMsg({t:e.message,bad:true})}finally{setBusy(false)}}
+  function choose(t) {
+    resolveRef.current?.abort();setResolving(false);clearSequence();setTarget(t);setCenter(t);
+    setRaInput(t.ra.toFixed(6));setDecInput(t.dec.toFixed(6));if(t.fov)setFov(t.fov);setQuery('');setPanel(false);
+  }
+  function updateURL(t=target, display=mode) {
+    const p=new URLSearchParams({ra:t.ra,dec:t.dec,fov,band,layer:survey,mode:display});
+    history.replaceState(null,'',`?${p}`);
+    return location.href;
+  }
+  async function locate(e) {
+    e.preventDefault();if(!query.trim()) return;
+    resolveRef.current?.abort();const controller=new AbortController();resolveRef.current=controller;
+    setResolving(true);setStatus(null);
+    try {const d=await api('/api/resolve?q='+encodeURIComponent(query.trim()),controller.signal);if(!controller.signal.aborted)choose({name:query.trim(),ra:d.ra,dec:d.dec,type:'Search result'});}
+    catch(err){if(err.name!=='AbortError')setStatus({error:true,text:err.message});}
+    finally{if(resolveRef.current===controller)setResolving(false);}
+  }
+  function applyCoordinates(e) {
+    e.preventDefault();const ra=Number(raInput),dec=Number(decInput);
+    if(!raInput.trim()||!decInput.trim()||!Number.isFinite(ra)||!Number.isFinite(dec)||ra<0||ra>=360||dec< -90||dec>90) {
+      setStatus({error:true,text:'Enter RA from 0 to 359.999° and Dec from −90 to +90°.'});return;
+    }
+    choose({name:'Selected sky patch',ra,dec,type:'ICRS coordinates'});
+  }
+  async function loadExposures(refresh=false) {
+    searchRef.current?.abort();const controller=new AbortController();searchRef.current=controller;
+    photoRef.current?.abort();setPhotOpen(false);setMeasuring(false);setPlaying(false);setBusy(true);setPanel(false);setStatus(null);setIndex(0);setData(null);setFrame(null);setInfo(null);setPhot(null);setFrameError('');setMode('sequence');
+    blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();
+    updateURL(target,'sequence');
+    try {
+      const d=await api('/api/observations?'+new URLSearchParams({ra:target.ra,dec:target.dec,fov,detector:band,limit:24,refresh}),controller.signal);
+      if(controller.signal.aborted)return;
+      setData(d);
+      if(!d.observations.length)setStatus({text:'No matching exposures in this release. Try another detector or sky patch.',empty:true});
+      else if(d.warnings.length)setStatus({text:d.warnings.join(' '),error:true});
+    } catch(err) {if(err.name!=='AbortError')setStatus({error:true,text:err.message});}
+    finally {if(searchRef.current===controller)setBusy(false);}
+  }
+  useEffect(()=>{if(initial.auto)loadExposures();return()=>{searchRef.current?.abort();resolveRef.current?.abort();photoRef.current?.abort();blobs.current.forEach(url=>URL.revokeObjectURL(url));};},[]);
+  useEffect(()=>{
+    if(!data || !obs.length)return;
+    const controller=new AbortController(), identity=`${data.key}/${index}`;
+    setFrameBusy(true);setFrameError('');setReady(-1);setInfo(null);setStars(null);
+    async function run() {
+      try {
+        let url=blobs.current.get(identity);
+        if(!url) {
+          const response=await fetch(`/api/frame/${identity}.png`,{signal:controller.signal,cache:'no-store'});
+          if(!response.ok){const d=await response.json().catch(()=>({}));throw Error(d.detail||'This exposure could not be loaded.');}
+          const blob=await response.blob();if(controller.signal.aborted)return;
+          url=URL.createObjectURL(blob);blobs.current.set(identity,url);
+        }
+        if(controller.signal.aborted)return;
+        setFrame({url,index,key:data.key});
+        api(`/api/frame-info/${identity}`,controller.signal).then(d=>{if(!controller.signal.aborted)setInfo(d);}).catch(()=>{});
+      } catch(err){if(err.name!=='AbortError'){setFrameError(err.message);setPlaying(false);setFrameBusy(false);}}
+    }
+    run();return()=>controller.abort();
+  },[data,index,retry]);
+  useEffect(()=>{
+    if(!playing||ready!==index||!frameMatches||frameError||obs.length<2)return;
+    const timer=setTimeout(()=>setIndex(i=>(i+1)%obs.length),speed);
+    return()=>clearTimeout(timer);
+  },[playing,ready,index,speed,frameMatches,frameError,obs.length]);
+  useEffect(()=>{
+    setStars(null);setGaiaError('');if(!gaia||!data||!obs.length)return;
+    const controller=new AbortController();
+    api(`/api/overlay/${data.key}/${index}.json`,controller.signal).then(d=>{if(!controller.signal.aborted)setStars(d);}).catch(e=>{if(e.name!=='AbortError')setGaiaError(e.message);});
+    return()=>controller.abort();
+  },[gaia,data,index]);
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3200);return()=>clearTimeout(timer);},[toast]);
+  useEffect(()=>{
+    function key(e) {
+      if(mode!=='sequence'||obs.length<1||about||photOpen||notesOpen||/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))return;
+      if(e.code==='Space'){e.preventDefault();if(obs.length>1)setPlaying(v=>!v);}
+      if(e.code==='ArrowRight'){e.preventDefault();setPlaying(false);setIndex(i=>(i+1)%obs.length);}
+      if(e.code==='ArrowLeft'){e.preventDefault();setPlaying(false);setIndex(i=>(i+obs.length-1)%obs.length);}
+    }
+    window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
+  },[mode,obs.length,about,photOpen,notesOpen]);
+  function move(direction){setPlaying(false);setIndex(i=>(i+direction+obs.length)%obs.length);}
+  function zoom(factor){if(mapRef.current)mapRef.current.setFoV(Math.min(180,Math.max(.01,mapRef.current.getFov()[0]*factor)));}
+  function toggleGrid(){const next=!grid;setGrid(next);if(mapRef.current){if(mapRef.current.setCooGrid)mapRef.current.setCooGrid({enabled:next,color:'#b4a679',opacity:.45});else mapRef.current.showCooGrid(next);}}
+  async function share(){const url=updateURL();try{await navigator.clipboard.writeText(url);setToast('Link copied. Same patch, same settings.');}catch{setToast('The address bar now contains your shareable link.');}}
+  async function measure(){
+    setPhotOpen(true);if(phot||measuring)return;
+    photoRef.current?.abort();const controller=new AbortController();photoRef.current=controller;setMeasuring(true);
+    try{const d=await api(`/api/photometry/${data.key}?max_frames=12`,controller.signal);if(!controller.signal.aborted)setPhot(d);}
+    catch(e){if(e.name!=='AbortError')setPhot({error:e.message});}finally{if(photoRef.current===controller)setMeasuring(false);}
+  }
+  function downloadMetadata(){const rows=obs.map(({id,date,band,collection,em_min,em_max,exptime})=>({id,date,band,collection,em_min,em_max,exptime}));const blob=new Blob([JSON.stringify({target,fov_arcmin:fov,observations:rows},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='skymotion-observations.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 
-  const o=obs[i],mj=obs.map(x=>x.mjd),have=obs.length>1&&mj.every(Number.isFinite),t0=have?Math.min(...mj):0,t1=have?Math.max(...mj):Math.max(obs.length-1,1);
-  const xOf=k=>10+((have?obs[k].mjd:k)-t0)/((t1-t0)||1)*980;
-  const years=have?Array.from({length:mjdYear(t1)-mjdYear(t0)+1},(_,k)=>mjdYear(t0)+k).filter(y=>jan1(y)>=t0&&jan1(y)<=t1):[];
-  const pv=phot.map(m=>m.proxy),lo=Math.min(...pv),hi=Math.max(...pv),yOf=v=>92-(v-lo)/((hi-lo)||1)*66;
-  return html`<div className="app">
-    <header className="rail"><h1>SkyMotion</h1><p className="tag">The infrared sky, exposure by exposure. Watch a patch of sky change and catch what moves.</p>
-      <h2>Targets to test</h2><ul>${TARGETS.map(t=>html`<li key=${t[0]}><button onClick=${()=>pick(t)}><b>${t[0]}</b><small>${t[3]}</small></button></li>`)}</ul>
-</header>
-    <main>
-      <form className="find" onSubmit=${locate}><input value=${q} onChange=${e=>setQ(e.target.value)} placeholder="Barnard’s Star" aria-label="Target name or coordinates"/>
-        <label>Field<select value=${fov} onChange=${e=>{const f=+e.target.value;setFov(f);view&&search(view.ra,view.dec,f,band)}}>${[1,2,3,6,12].map(f=>html`<option key=${f} value=${f}>${f}′ across</option>`)}</select></label>
-        <label>Detector<select value=${band} onChange=${e=>{setBand(e.target.value);view&&search(view.ra,view.dec,fov,e.target.value)}}>${['D1','D2','D3','D4','D5','D6','all'].map(b=>html`<option key=${b}>${b}</option>`)}</select></label>
-        <button className="go" disabled=${busy}>${busy?'Working…':'Find'}</button></form>
-      <p className=${'status'+(msg.bad?' bad':'')} role="status">${msg.t}</p>
-      <${Plate} src=${o?frame(i):''} fov=${view?.fov} stars=${gaia?stars:null} onLoad=${()=>setShown(i)} onError=${()=>{setShown(i);setMsg({t:`Frame ${i+1} could not be read from the archive.`,bad:true})}}/>
-      <p className="cap">${view?`Ticks mark ${(view.fov/4).toFixed(2)}′ (long) and ${(view.fov/20).toFixed(2)}′ (short) from the edge. Centered on RA ${(+view.ra).toFixed(4)}°, Dec ${(+view.dec).toFixed(4)}°. Each frame is stretched on its own.`:''}${gaia&&stars?(stars.note||` ${stars.stars.length} Gaia stars, moved to this date. Dashed amber moves fast. A mover with no ring is worth a look.`):''}</p>
-      <div className="ctl"><button onClick=${()=>setI((i+obs.length-1)%obs.length)} disabled=${!obs.length}>Back</button><button onClick=${()=>setPlay(!play)} disabled=${!obs.length}>${play?'Pause':'Play'}</button><button onClick=${()=>setI((i+1)%obs.length)} disabled=${!obs.length}>Forward</button>
-        <label>Pace<select value=${speed} onChange=${e=>setSpeed(+e.target.value)}><option value="1800">Slow</option><option value="900">Steady</option><option value="400">Fast</option></select></label>
-        <label><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)} disabled=${!obs.length}/>Gaia stars</label>
-        <button onClick=${measure} disabled=${!obs.length||busy}>Measure brightness</button></div>
-      ${obs.length?html`<div style=${{marginTop:30}}><svg className="axis" viewBox="0 0 1000 64" role="group" aria-label="Exposure dates on a shared time axis"><line x1="10" x2="990" y1="34" y2="34" stroke="#2a2650"/>
-        ${obs.map((x,k)=>html`<g key=${k}><line x1=${xOf(k)} x2=${xOf(k)} y1=${k===i?10:24} y2="34" stroke=${k===i?'#a08cff':'#d3d5e4'} strokeWidth=${k===i?3:1.2}/><rect className="hit" x=${xOf(k)-7} y="6" width="14" height="34" onClick=${()=>{setPlay(false);setI(k)}}><title>${day(x.date)}</title></rect></g>`)}
-        ${years.map(y=>html`<g key=${y}><line x1=${xOf0(jan1(y),t0,t1)} x2=${xOf0(jan1(y),t0,t1)} y1="36" y2="44" stroke="#8f91ab"/><text x=${xOf0(jan1(y),t0,t1)} y="60" textAnchor="middle">${y}</text></g>`)}</svg>
-        ${phot.length?html`<svg className="axis" viewBox="0 0 1000 100" style=${{marginTop:6}} role="img" aria-label="Brightness proxy over time"><polyline fill="none" stroke="#d3d5e4" strokeWidth="1.4" points=${phot.map(m=>`${xOf(m.index)},${yOf(m.proxy)}`).join(' ')}/>${phot.map(m=>html`<circle key=${m.index} cx=${xOf(m.index)} cy=${yOf(m.proxy)} r=${m.index===i?5:3} fill=${m.index===i?'#a08cff':'#d3d5e4'}/>`)}<text x="12" y="14">uncalibrated brightness, same time axis</text></svg>`:null}</div>`:null}
+  return html`<div className=${`app ${mode==='sequence'?'sequence-mode':''}`}>
+    <header className="topbar">
+      <a className="brand" href="/" aria-label="SkyMotion home"><span className="brand-mark"><${Icon} name="star" size=${25}/></span><span>SkyMotion<span className="brand-period">.</span></span></a>
+      <span className="topbar-note">THE SKY, OVER TIME</span>
+      <div className="topbar-right"><span className="archive-badge"><span className=${`status-dot ${status?.error?'warning':''}`}></span>SPHEREx <span className="muted">/ DR1</span></span>
+      <button className="text-button about-button" onClick=${()=>setAbout(true)}><${Icon} name="info" size=${16}/> About the data</button>
+      <button className="share-button" onClick=${share}><${Icon} name="share" size=${15}/> Share patch</button>
+      <button className="icon-button mobile-menu" aria-label="Toggle search panel" aria-expanded=${panel} onClick=${()=>setPanel(v=>!v)}><${Icon} name=${panel?'cross':'menu'}/></button></div>
+    </header>
+    <main className="workspace">
+      <${SkyMap} mapRef=${mapRef} target=${target} survey=${survey} onCenter=${setCenter} onState=${setMapState}/>
+      <div className="map-shade"></div>
+      ${mapState!=='ready' ? html`<div className="map-message" role="status"><${Icon} name=${mapState==='error'?'layers':'star'} size=${26}/><strong>${mapState==='error'?'The sky map couldn’t connect':mapState==='slow'?'The sky survey is taking a little longer':'Opening the sky atlas'}</strong><p>${mapState==='error'?'CDS Aladin is unavailable or blocked by your browser. SPHEREx search works independently.':'Real survey tiles load from CDS. You can choose a target while they arrive.'}</p>${mapState==='error'||mapState==='slow'?html`<button className="subtle-button" onClick=${()=>location.reload()}>Retry map</button>`:html`<span className="loading-line"></span>`}</div>`:null}
+      <aside className=${`explorer panel ${panel?'is-open':''}`} aria-label="Find and select a sky patch">
+        <div className="explorer-intro"><span className="eyebrow">AN OPEN SKY EXPLORER</span><h1>A sky that never<br/>stands still.</h1><p>Find a patch. Look closer. Watch it change.</p></div>
+        <form className="search-box" onSubmit=${locate}><${Icon} name="search" size=${18}/><input aria-label="Search object or coordinates" value=${query} onChange=${e=>setQuery(e.target.value)} placeholder="Object name or RA, Dec"/><button aria-label="Find target" disabled=${resolving}>${resolving?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button></form>
+        <div className="selected-target"><div><span className="eyebrow">SELECTED PATCH</span><h2>${target.name}</h2><span className="coordinate-text">${coords(target)}</span></div><button className="icon-button" title="Recenter map" aria-label="Recenter on selected target" onClick=${()=>mapRef.current?.gotoRaDec(target.ra,target.dec)}><${Icon} name="target"/></button></div>
+        <details className="coordinate-details"><summary>Enter exact coordinates <span>+</span></summary><form onSubmit=${applyCoordinates}><div className="input-pair"><label>RA · degrees<input aria-label="Right ascension in degrees" inputMode="decimal" value=${raInput} onChange=${e=>setRaInput(e.target.value)}/></label><label>Dec · degrees<input aria-label="Declination in degrees" inputMode="decimal" value=${decInput} onChange=${e=>setDecInput(e.target.value)}/></label></div><button className="subtle-button">Go to coordinates <${Icon} name="arrow" size=${14}/></button></form></details>
+        <div className="target-list"><div className="section-label"><span className="eyebrow">SOMETHING TO LOOK FOR</span><span className="muted">05 targets</span></div>
+          ${TARGETS.map(t=>html`<button key=${t.name} className=${`target-row ${target.name===t.name?'active':''}`} onClick=${()=>choose(t)}><span className="target-number">${t.tag}</span><span><strong>${t.name}</strong><small>${t.type}</small></span><${Icon} name="arrow" size=${15}/></button>`)}
+        </div>
+        <div className="observation-settings"><div className="input-pair"><label>Cutout size<select aria-label="Cutout size" value=${fov} onChange=${e=>{clearSequence();setFov(+e.target.value);}}>${[1,2,3,6,12].map(v=>html`<option key=${v} value=${v}>${v} arcmin</option>`)}</select></label><label>SPHEREx detector<select aria-label="SPHEREx detector" value=${band} onChange=${e=>{clearSequence();setBand(e.target.value);}}>${Object.keys(DETECTORS).map(b=>html`<option key=${b} value=${b}>${b} · ${DETECTORS[b]}</option>`)}</select></label></div>
+        <button className="primary-button" disabled=${busy||resolving} onClick=${()=>loadExposures()}><span>${busy?'Finding exposures…':'Load SPHEREx exposures'}</span>${busy?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button>
+        <p className="quiet-note">Real infrared observations from NASA / IPAC.</p></div>
+      </aside>
+      <div className="map-top-controls"><div className="view-switch" role="group" aria-label="Viewer mode"><button className=${mode==='atlas'?'active':''} onClick=${()=>{setMode('atlas');setPlaying(false);}}>Sky atlas</button><button className=${mode==='sequence'?'active':''} onClick=${()=>setMode('sequence')}>SPHEREx sequence ${obs.length?html`<span>${obs.length}</span>`:null}</button></div>
+      <label className="survey-select"><${Icon} name="layers" size=${16}/><span className="sr-only">Sky survey</span><select aria-label="Sky survey" value=${survey} onChange=${e=>setSurvey(e.target.value)}>${Object.entries(SURVEYS).map(([k,s])=>html`<option key=${k} value=${k}>${s.label}</option>`)}</select></label></div>
+      ${mode==='atlas'?html`<div className="atlas-center">${selectedMoved?html`<button className="search-area" onClick=${()=>choose({name:'Selected sky patch',ra:center.ra,dec:center.dec,type:'Map selection'})}>Use this sky position <${Icon} name="plus" size=${13}/></button>`:null}</div>`:null}
+      ${mode==='atlas'?html`<div className="map-title"><span className="eyebrow">${SURVEYS[survey].short} / REFERENCE ATLAS</span><h2>${selectedMoved?'The sky is yours to explore.':target.name}</h2><p>${coords(center)} <span>ICRS</span></p></div>`:null}
+      ${mode==='atlas'?html`<div className="map-tools"><span className="north-label">N <span>↑</span></span><div className="tool-stack"><button aria-label="Zoom in" title="Zoom in" disabled=${mapState!=='ready'} onClick=${()=>zoom(.6)}><${Icon} name="plus"/></button><button aria-label="Zoom out" title="Zoom out" disabled=${mapState!=='ready'} onClick=${()=>zoom(1.6)}><${Icon} name="minus"/></button></div><button className=${`map-tool ${grid?'active':''}`} aria-pressed=${grid} aria-label="Toggle coordinate grid" title="Coordinate grid" disabled=${mapState!=='ready'} onClick=${toggleGrid}><${Icon} name="grid"/></button><button className="map-tool" aria-label="Return to Orion Nebula" title="Return to Orion Nebula" onClick=${()=>choose(ORION)}><${Icon} name="target"/></button></div>`:null}
+      ${mode==='sequence'?html`<section className="sequence-stage" aria-label="SPHEREx observation viewer">
+        ${busy?html`<div className="sequence-placeholder"><span className="spinner large"></span><span className="eyebrow">NASA / IPAC INFRARED SCIENCE ARCHIVE</span><h2>Finding this patch in time.</h2><p>Looking for ${band} observations covering ${target.name}.<br/>Archive requests can take a minute or two.</p><button className="subtle-button" onClick=${()=>{searchRef.current?.abort();setBusy(false);setStatus(null);setMode('atlas');}}>Back to the atlas</button></div>`:
+        obs.length?html`<div className="frame-layout"><div className="frame-heading"><div><span className="eyebrow">SPHEREx / ${band} / ${fov}′ FIELD</span><h2>${target.name}</h2></div><span className="frame-number">${String(index+1).padStart(2,'0')}<span> / ${String(obs.length).padStart(2,'0')}</span></span></div>
+          <div className="science-frame">
+            ${frameMatches?html`<img src=${frame.url} alt=${`SPHEREx infrared exposure of ${target.name}, ${date(o.date)}`} onLoad=${()=>{setReady(index);setFrameBusy(false);}} onError=${()=>{setFrameError('The image could not be decoded. Retry this frame.');setFrameBusy(false);setPlaying(false);}}/>`:null}
+            ${gaia&&frameMatches&&stars?html`<svg className="gaia-overlay" viewBox="0 0 100 100">${stars.stars.map(s=>html`<circle key=${s.id} cx=${s.x*100} cy=${s.y*100} r="1.5" fill="none" stroke="#e2cd8d" strokeWidth=".22" strokeDasharray=${s.pm>100?'1 .7':null}><title>Gaia ${s.id}; proper motion ${s.pm.toFixed(0)} mas/yr</title></circle>`)}</svg>`:null}
+            <div className="frame-crosshair"></div><span className="frame-north">N ↑<br/>E ←</span><span className="frame-scale">${fov} arcmin</span>
+            ${frameBusy&&!frameError?html`<div className="frame-loading"><span className="spinner"></span><span>Loading exposure ${index+1}…</span></div>`:null}
+            ${frameError?html`<div className="frame-error" role="alert"><${Icon} name="info" size=${24}/><p>${frameError}</p><button className="subtle-button" onClick=${()=>{blobs.current.delete(`${data.key}/${index}`);setRetry(v=>v+1);}}>Retry frame</button><button className="text-button" onClick=${()=>move(1)} disabled=${obs.length<2}>Skip to next exposure</button></div>`:null}
+          </div>
+          <div className="frame-caption"><span>${date(o.date)} <span className="muted">UTC</span></span><span>North up · same sky grid</span></div><button className="mobile-notes text-button" onClick=${()=>{setPlaying(false);setNotesOpen(true);}}>Exposure notes & Gaia <${Icon} name="info" size=${13}/></button>
+        </div>`:html`<div className="sequence-placeholder"><${Icon} name="layers" size=${30}/><span className="eyebrow">A DIFFERENT VIEW OF TIME</span><h2>${status?.empty?'No exposures in this patch.':status?.error?'The archive couldn’t connect.':'See what changes.'}</h2><p>${status?.text||'Load infrared exposures of your selected patch, then step through them or press play.'}</p><button className="primary-button" onClick=${()=>loadExposures(true)}>${status?.error?'Retry archive':'Load SPHEREx exposures'}<${Icon} name="arrow" size=${17}/></button><button className="text-button" onClick=${()=>setMode('atlas')}>Return to sky atlas</button></div>`}
+        ${obs.length?html`<aside className="exposure-info panel"><span className="eyebrow">EXPOSURE NOTES</span><dl><dt>Observed</dt><dd>${date(o.date)}</dd><dt>Detector</dt><dd>${band} <span>${DETECTORS[band]}</span></dd><dt>Wavelength at center</dt><dd>${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'Not available'}</dd><dt>Release</dt><dd>${o.collection.replace('spherex_','').toUpperCase()}</dd><dt>Flagged pixels</dt><dd>${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'Not available'}</dd><dt>Patch covered</dt><dd>${info?`${(info.coverage*100).toFixed(0)}%`:'…'}</dd></dl>
+          <label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>
+          ${gaiaError?html`<p className="inline-warning">${gaiaError}</p>`:null}
+          <p className="science-note">Brightness and wavelength can vary between exposures. The same detector is not the same spectral channel.</p>
+          <button className="text-button" onClick=${measure}>Brightness proxy <${Icon} name="arrow" size=${14}/></button><button className="text-button" onClick=${downloadMetadata}>Save metadata <${Icon} name="download" size=${14}/></button>
+        </aside>`:null}
+      </section>`:null}
+      ${status && (mode==='atlas'||obs.length>0)?html`<div className=${`notice ${status.error?'notice-error':''}`} role="status"><${Icon} name="info" size=${17}/><span>${status.text}</span><button aria-label="Dismiss message" onClick=${()=>setStatus(null)}><${Icon} name="cross" size=${15}/></button></div>`:null}
+      <section className="timeline panel" aria-label="Observation playback">
+        <div className="timeline-header"><span className="eyebrow"><span className="tiny-star">+</span> OBSERVATION TIMELINE</span><span className="timeline-count">${obs.length?`${obs.length} of ${data.total} exposures · ${band}`:'SPHEREx · near-infrared'}</span></div>
+        <div className="timeline-main"><div className="play-controls"><button className="icon-button" aria-label="Previous exposure" disabled=${!obs.length} onClick=${()=>{setMode('sequence');move(-1);}}><${Icon} name="back" size=${17}/></button><button className="play-button" aria-label=${playing?'Pause playback':'Play observations'} disabled=${obs.length<2||!!frameError} onClick=${()=>{setMode('sequence');setPlaying(v=>!v);}}><${Icon} name=${playing?'pause':'play'} size=${20}/></button><button className="icon-button" aria-label="Next exposure" disabled=${!obs.length} onClick=${()=>{setMode('sequence');move(1);}}><${Icon} name="next" size=${17}/></button></div>
+        <div className="timeline-track">${obs.length?html`<input className="exposure-slider" aria-label="Exposure number" type="range" min="0" max=${Math.max(0,obs.length-1)} value=${index} onChange=${e=>{setPlaying(false);setMode('sequence');setIndex(+e.target.value);}}/><div className="timeline-dates"><span>${date(obs[0].date)}</span><span>${obs.length===1?'One available exposure':`${index+1} / ${obs.length}`}</span><span>${date(obs[obs.length-1].date)}</span></div>`:html`<div className="empty-track"><span></span><p>${busy?'Searching the archive…':'Choose a patch, then load its history.'}</p></div>`}</div>
+        <label className="pace"><span>Playback</span><select aria-label="Playback speed" value=${speed} onChange=${e=>setSpeed(+e.target.value)}><option value="1800">Slow</option><option value="1000">Steady</option><option value="450">Fast</option></select></label></div>
+        <div className="timeline-foot"><span>${obs.length?'Aligned frames · independent intensity stretch · use ← → to step':'Drag to explore the map. Scroll to zoom. The atlas is a reference, not a time series.'}</span>${obs.length?html`<button className="text-button" onClick=${()=>loadExposures(true)} disabled=${busy}><${Icon} name="refresh" size=${12}/> Refresh archive</button>`:null}</div>
+      </section>
+      <footer className="map-credit"><span>${mode==='atlas'?SURVEYS[survey].credit:'SPHEREx · NASA / JPL / Caltech · IRSA'}</span><button onClick=${()=>setAbout(true)}>Data & credits</button></footer>
+      ${toast?html`<div className="toast" role="status">${toast}</div>`:null}
     </main>
-    <aside className="ledger"><dl>
-      <dt>Exposure</dt><dd>${o?`${i+1} of ${obs.length}`:'none loaded'}</dd>
-      <dt>Taken</dt><dd>${o?day(o.date):'-'}</dd>
-      <dt>Detector</dt><dd>${o?o.band.replace('SPHEREx-',''):'-'}</dd>
-      <dt>Wavelength</dt><dd>${o&&o.em_min?`${(o.em_min*1e6).toFixed(2)} to ${(o.em_max*1e6).toFixed(2)} µm`:'-'}</dd>
-      <dt>Release</dt><dd>${o?o.collection.replace('spherex_','').toUpperCase():'-'}</dd>
-      <dt>Newest in this sample</dt><dd>${obs.length?day(obs.map(x=>x.date).filter(Boolean).sort().pop()):'-'}</dd></dl>
-      <p style=${{marginTop:30}}>SPHEREx reads a different wavelength at each spot on its detector, so two frames can differ because of colour, not because anything changed. Compare frames from the same detector.</p><p className="credit">Images: NASA/IPAC Infrared Science Archive, SPHEREx. Stars: ESA Gaia DR3. Names: SIMBAD, CDS. An independent project, not an official NASA product.</p></aside></div>`;
+    ${about?html`<${Modal} title="A real sky. A changing sky." onClose=${()=>setAbout(false)}><p>SkyMotion lets you explore a sky survey and compare infrared observations from NASA’s SPHEREx mission.</p><div className="about-section"><h3>The colorful atlas</h3><p>DSS, 2MASS, and WISE are real astronomical surveys displayed through CDS Aladin. Their color composites combine telescope bands; they are reference maps, not SPHEREx frames or a view of how the sky looks to your eyes.</p></div><div className="about-section"><h3>The SPHEREx sequence</h3><p>Each grayscale frame comes from an IRSA FITS science image. Exposures are resampled onto one north-up, east-left coordinate grid. Playback waits for the current frame to load.</p><p>Frames use independent intensity stretches. Wavelength, detector noise, flagged pixels, and PSF changes can imitate variability. Compare metadata before interpreting changes. Flag percentages count any nonzero flag; these pixels are not automatically rejected.</p></div><div className="about-section"><h3>Looking for motion</h3><p>Start with the five challenge targets, choose a detector, and load exposures. Use the arrow keys to step through. Gaia rings use approximate linear proper motion; missing rings do not establish a new discovery. Suggested target coordinates are finding positions, not date-propagated ephemerides. Fast-moving targets open a wider cutout to include their more recent positions.</p></div><p className="credit-line">Independent NASA Space Apps project. Not an official NASA product.<br/>Data: NASA / JPL / Caltech / IPAC, STScI, UMass, UCLA, ESA Gaia. Sky viewer and name lookup: CDS Aladin / Sesame.</p><div className="about-links"><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noreferrer">SPHEREx at IRSA ↗</a><a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noreferrer">CDS Aladin ↗</a></div></${Modal}>`:null}
+    ${notesOpen&&o?html`<${Modal} title="Exposure notes" onClose=${()=>setNotesOpen(false)}><p>${date(o.date)} · ${band} · ${o.collection.replace('spherex_','').toUpperCase()}</p><p>Center wavelength: ${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'not available'}<br/>Flagged pixels: ${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'not available'}</p><label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>${gaiaError?html`<p>${gaiaError}</p>`:null}<p className="science-note">Each frame has its own intensity stretch. Wavelength, PSF, and flagged pixels can imitate changes. Compare metadata before interpreting variability.</p><button className="subtle-button" onClick=${()=>{setNotesOpen(false);measure();}}>Measure brightness proxy</button><button className="text-button" style=${{marginLeft:14}} onClick=${downloadMetadata}>Save metadata</button></${Modal}>`:null}
+    ${photOpen?html`<${Modal} title="Exploratory brightness" onClose=${()=>setPhotOpen(false)}>${measuring?html`<p className="measurement-loading"><span className="spinner"></span> Measuring up to 12 exposures. This can take several minutes.</p>`:phot?.error?html`<p role="alert">${phot.error}</p>`:phot?html`<p>${phot.warning}</p><div className="measurement-table"><table><thead><tr><th>Date · UTC</th><th>Center µm</th><th>Brightness proxy</th></tr></thead><tbody>${phot.measurements.map(m=>html`<tr key=${m.index}><td>${date(m.date)}</td><td>${m.wavelength_um?.toFixed(3)||'—'}</td><td>${Number.isFinite(m.proxy)?m.proxy.toPrecision(5):'Unavailable'}</td></tr>`)}</tbody></table>${!phot.measurements.length?html`<p>No usable aperture measurements in these frames.</p>`:null}</div>`:null}</${Modal}>`:null}
+  </div>`;
 }
-const xOf0=(m,t0,t1)=>10+(m-t0)/((t1-t0)||1)*980;
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
