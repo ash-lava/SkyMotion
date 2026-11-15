@@ -9,7 +9,17 @@ python -m pip install -r requirements.txt
 python -m uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000. Keep all supplied application files in the same directory. Do not open index.html as a local file. React 18 and htm are included; there is no npm build step. Aladin Lite v3 and real survey tiles load from CDS in the browser. The Python server needs internet access to IRSA, CDS Sesame, and ESA Gaia for their respective features.
+Open http://localhost:8000. Keep all supplied application files in the same directory. Do not open index.html as a local file. React 18 and htm are included; there is no npm build step. Aladin Lite v3 is attempted first. If its script, WebAssembly, or WebGL initialization fails or takes over 8 seconds, a local image-based atlas takes over. This fallback fetches real survey images through the Python API and needs no external browser script or WebGL. The Python server needs internet access to IRSA, CDS Sesame, and ESA Gaia for their respective features.
+
+## Version 2.0.1 map-loader repair
+
+- Supports both `window.A` and global lexical `A` in classic Aladin bundles.
+- Script, initialization, and graphics failures automatically switch to a local atlas.
+- `/api/sky.jpg` retrieves a real color survey image using an explicit ICRS TAN WCS. It tries the two documented CDS HiPS2FITS endpoints, validates dimensions and image bytes, and bounds cache memory and request sizes.
+- The local atlas supports drag/pan, wheel or pinch zoom, keyboard navigation, survey switching, exact sky-center updates, and a coordinate grid. Images refresh after navigation; this is an image-based fallback, not Aladin's progressive tile renderer. Its largest image dimension is limited to a 60-degree TAN field.
+- The browser requests fallback images from the same Render origin. Third-party browser script blocking and WebGL availability no longer determine whether the fallback starts. A real outage at both survey-image services can still prevent imagery.
+- Force the local atlas with `?atlas=basic`. The Retry map control retries its image request without reloading the app. Network errors show a specific message; the original Aladin failure is also recorded in the browser console.
+- New files `sky_service.py` and `sky-atlas.js` must be uploaded alongside the updated `server.py`, `app.js`, `style.css`, and `index.html`.
 
 ## What changed
 
@@ -59,11 +69,13 @@ https://YOUR-SITE/?ra=133.7951292&dec=-7.2451472&fov=12&band=D2&layer=wise&mode=
 ```bash
 python -m unittest -v test_server.py
 node test_frontend.cjs
+node test_sky_atlas.cjs
+node test_map_loader.cjs
 ```
 
 The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test DOM layout or Aladin itself.
 
-At handoff: **22 Python tests passed, 3 Astropy tests skipped, 10 frontend state tests passed**. Direct outbound requests to the deployed app/IRSA/CDS, package installation, and Chromium rendering were restricted in the editing workspace. Consequently, live FITS downloads, astronomy tests, and visual/browser integration are not claimed as verified. The supplied Render build command runs the full Python suite after dependency installation. Use START_HERE.txt's deployment checks for actual surveys and all five targets.
+At handoff: **30 Python tests passed, 3 Astropy tests skipped, 10 frontend state tests passed, 10 atlas geometry/lifecycle tests passed, 4 map-loader integration tests passed**. Direct outbound requests to the deployed app/IRSA/CDS, package installation, and Chromium rendering were restricted in the editing workspace. Consequently, live FITS downloads, astronomy tests, and visual/browser integration are not claimed as verified. The supplied Render build command runs the full Python suite after dependency installation. Use START_HERE.txt's deployment checks for actual surveys and all five targets.
 
 ## Data sources and documentation
 
@@ -71,6 +83,7 @@ At handoff: **22 Python tests passed, 3 Astropy tests skipped, 10 frontend state
 - [IRSA introduction: current collections and FITS structure](https://caltech-ipac.github.io/irsa-tutorials/spherex-intro/)
 - [SPHEREx cutout documentation](https://irsa.ipac.caltech.edu/data/SPHEREx/docs/cutout_tool.html)
 - [Cutout tutorial and spectral WCS](https://caltech-ipac.github.io/irsa-tutorials/spherex-cutouts/)
+- [CDS HiPS2FITS service documentation and its two endpoints](https://alasky.u-strasbg.fr/hips-image-services/hips2fits)
 - [Aladin Lite](https://aladin.cds.unistra.fr/AladinLite/) and [current API reference](https://cds-astro.github.io/aladin-lite/Aladin.html)
 - [Epsilon Indi B catalog position](https://simbad.u-strasbg.fr/simbad/sim-id?Ident=Epsilon+Indi+B)
 - [RW Aurigae catalog position](https://simbad.cds.unistra.fr/simbad/sim-id?Ident=V%2A+RW+Aur)

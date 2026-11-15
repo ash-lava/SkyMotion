@@ -71,7 +71,7 @@ class APITests(unittest.TestCase):
     def tearDown(self):self.client.close();self.status.stop();self.cache.stop();self.tmp.cleanup()
     def test_health_and_archive_do_not_probe(self):
         with patch.object(archive,'get_table') as probe:
-            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.0');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
+            self.assertEqual(self.client.get('/api/health').json()['version'],'2.0.1');self.assertEqual(self.client.get('/api/archive').json()['status'],'unchecked');probe.assert_not_called()
     def test_coordinate_validation_and_resolution(self):
         for query in ('ra=360&dec=0','ra=0&dec=91','ra=nan&dec=0','ra=0&dec=0&fov=90'):self.assertEqual(self.client.get('/api/observations?'+query).status_code,422)
         self.assertEqual(self.client.get('/api/resolve',params={'q':'133.79513, -7.24515'}).json()['ra'],133.79513)
@@ -110,6 +110,53 @@ class APITests(unittest.TestCase):
     def test_only_frontend_assets_public(self):
         for path in ('/','/static/app.js','/static/style.css','/static/vendor/htm.js'):self.assertEqual(self.client.get(path).status_code,200)
         self.assertEqual(self.client.get('/static/server.py').status_code,404);self.assertEqual(self.client.get('/static/archive_client.py').status_code,404)
+class SkyServiceTests(unittest.TestCase):
+    def setUp(self):
+        import sky_service
+        self.sky=sky_service;self.sky.CACHE.clear();self.client=TestClient(server.app)
+        image=Image.new('RGB',(64,64),(20,30,40));buffer=io.BytesIO();image.save(buffer,format='JPEG');self.jpeg=buffer.getvalue()
+    def tearDown(self):self.client.close();self.sky.CACHE.clear()
+    def test_valid_survey_image_and_cache(self):
+        with patch.object(archive,'fetch_bytes',return_value=self.jpeg) as fetch:
+            first=self.client.get('/api/sky.jpg?ra=83.8&dec=-5.3&width=64&height=64')
+            second=self.client.get('/api/sky.jpg?ra=83.8&dec=-5.3&width=64&height=64')
+        self.assertEqual(first.status_code,200);self.assertEqual(first.headers['content-type'],'image/jpeg')
+        self.assertEqual(first.content,second.content);self.assertEqual(fetch.call_count,1)
+        self.assertEqual(first.headers['x-sky-source'],'CDS/P/DSS2/color')
+    def test_automatic_second_endpoint(self):
+        with patch.object(archive,'fetch_bytes',side_effect=[archive.ArchiveError('HTTP 502'),self.jpeg]) as fetch:
+            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
+        self.assertEqual(result.status_code,200);self.assertEqual(fetch.call_count,2)
+        self.assertIn('alaskybis',fetch.call_args_list[1].args[0])
+    def test_both_endpoints_fail_with_useful_error(self):
+        with patch.object(archive,'fetch_bytes',side_effect=archive.ArchiveError('HTTP 502')):
+            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
+        self.assertEqual(result.status_code,503);self.assertEqual(result.json()['detail']['code'],'SKY_SURVEY_UNAVAILABLE')
+        self.assertEqual(len(result.json()['detail']['upstream']),2);self.assertFalse(self.sky.CACHE)
+    def test_html_is_not_cached_as_an_image(self):
+        with patch.object(archive,'fetch_bytes',return_value=b'<html>Proxy error</html>'):
+            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=64&height=64')
+        self.assertEqual(result.status_code,503);self.assertFalse(self.sky.CACHE)
+    def test_bad_parameters_do_not_contact_upstream(self):
+        with patch.object(archive,'fetch_bytes') as fetch:
+            for suffix in ('ra=360&dec=0','ra=1&dec=99','ra=1&dec=0&width=10000','ra=1&dec=0&fov=180'):
+                self.assertEqual(self.client.get('/api/sky.jpg?'+suffix).status_code,422)
+            self.assertEqual(self.client.get('/api/sky.jpg?ra=1&dec=0&survey=https://example.com').status_code,400)
+            fetch.assert_not_called()
+    def test_wcs_center_scale_and_orientation(self):
+        import math
+        wcs=self.sky.image_wcs(359.9,89,10,1000,500)
+        self.assertEqual(wcs['CRPIX1'],500.5);self.assertEqual(wcs['CRPIX2'],250.5)
+        self.assertEqual(wcs['CRVAL1'],359.9);self.assertLess(wcs['CDELT1'],0);self.assertGreater(wcs['CDELT2'],0)
+        self.assertAlmostEqual(math.degrees(2*math.atan(math.radians(wcs['CDELT2'])*1000/2)),10)
+    def test_local_fallback_script_is_served(self):
+        result=self.client.get('/static/sky-atlas.js');self.assertEqual(result.status_code,200)
+        self.assertIn('pixelToSky',result.text)
+    def test_size_mismatch_is_rejected(self):
+        with patch.object(archive,'fetch_bytes',return_value=self.jpeg):
+            result=self.client.get('/api/sky.jpg?ra=1&dec=0&width=128&height=128')
+        self.assertEqual(result.status_code,503)
+
 @unittest.skipUnless(importlib.util.find_spec('astropy'),'Astropy is not installed in this test environment')
 class AstronomyTests(unittest.TestCase):
     def test_wcs_rotation_alignment(self):

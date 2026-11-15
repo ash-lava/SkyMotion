@@ -17,3 +17,14 @@
 
 .mobile-notes{display:none}
 @media(max-width:1000px) and (min-width:851px),(max-width:560px){.mobile-notes{display:flex;font-size:9px;margin-top:8px;color:var(--gold-dim);align-self:center}.frame-layout{width:min(100%,calc(100dvh - 390px))}}
+
+/* Local, non-WebGL atlas fallback. Survey images retain their true aspect ratio. */
+.native-atlas{overflow:hidden;touch-action:none;cursor:grab;outline-offset:-3px}
+.native-atlas:active{cursor:grabbing}
+.native-sky-image{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;transform-origin:center;user-select:none;pointer-events:none}
+.native-sky-grid{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.native-sky-reticle{position:absolute;left:50%;top:50%;width:27px;height:27px;transform:translate(-50%,-50%);border:1px solid #dfcb9490;border-radius:50%;pointer-events:none}
+.native-sky-reticle:before,.native-sky-reticle:after{content:'';position:absolute;background:#dfcb94}
+.native-sky-reticle:before{width:1px;height:7px;left:12px;top:9px}.native-sky-reticle:after{width:7px;height:1px;left:9px;top:12px}
+.native-sky-badge{position:absolute;right:10px;bottom:10px;font:8px var(--sans);color:#c5bda5;background:#080909cc;padding:4px 7px;border-radius:3px;pointer-events:none}
+.native-pending .native-sky-image{opacity:.45}

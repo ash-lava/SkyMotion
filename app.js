@@ -50,39 +50,61 @@ function initialState() {
 }
 let aladinPromise;
 function loadAladin() {
+  if (new URLSearchParams(location.search).get('atlas')==='basic') return Promise.reject(Error('Basic atlas selected'));
   if (!aladinPromise) aladinPromise = new Promise((resolve,reject) => {
-    if (window.A) { Promise.resolve(A.init).then(resolve,reject); return; }
-    const script = document.createElement('script');
+    const timer=setTimeout(()=>reject(Error('Aladin initialization timed out')),8000);
+    const fail=error=>{clearTimeout(timer);reject(error);};
+    const initialize=()=>{
+      // Some classic bundles expose a global lexical A rather than window.A.
+      const engine=window.A || (typeof A!=='undefined' ? A : null);
+      if(!engine || typeof engine.aladin!=='function'){fail(Error('Aladin script loaded without a usable API'));return;}
+      Promise.resolve(engine.init).then(()=>{clearTimeout(timer);resolve(engine);},fail);
+    };
+    if(window.A || typeof A!=='undefined'){initialize();return;}
+    const script=document.createElement('script');
     script.src='https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js';
-    script.async=true;
-    script.onload=()=>window.A ? Promise.resolve(A.init).then(resolve,reject) : reject(Error('Sky engine unavailable'));
-    script.onerror=()=>reject(Error('Sky engine unavailable'));
+    script.async=true;script.onload=initialize;
+    script.onerror=()=>fail(Error('Aladin script could not be downloaded'));
     document.head.appendChild(script);
   });
   return aladinPromise;
 }
-function SkyMap({mapRef,target,survey,onCenter,onState}) {
+function SkyMap({mapRef,target,survey,onCenter,onState,onError}) {
   const targetRef=useRef(target), surveyRef=useRef(survey);
-  targetRef.current=target; surveyRef.current=survey;
+  targetRef.current=target;surveyRef.current=survey;
   useEffect(()=>{
-    let cancelled=false;
-    const timeout=setTimeout(()=>{if(!cancelled && !mapRef.current) onState('slow');},18000);
-    loadAladin().then(()=>{
-      if(cancelled) return;
+    let cancelled=false,active=null;
+    const connect=map=>{
+      active=map;mapRef.current=map;
+      map.on('positionChanged',({ra,dec})=>onCenter({ra,dec}));
+      onCenter({ra:targetRef.current.ra,dec:targetRef.current.dec});
+    };
+    function fallback(error){
+      if(cancelled)return;
+      console.warn('SkyMotion: using the built-in atlas after Aladin initialization failed.',error);
+      try{
+        const t=targetRef.current;
+        const map=window.SkyAtlas.create(document.getElementById('sky-map'),{ra:t.ra,dec:t.dec,fov:t===ORION?1.4:.35,survey:SURVEYS[surveyRef.current].id});
+        connect(map);
+        map.on('loading',()=>{if(!cancelled&&!map.shown)onState('loading');});
+        map.on('ready',()=>{if(!cancelled){onError('');onState('ready');}});
+        map.on('error',err=>{if(!cancelled){onError(err.message);onState('error');}});
+      }catch(err){onError('The built-in map could not start: '+err.message);onState('error');}
+    }
+    loadAladin().then(engine=>{
+      if(cancelled)return;
       const t=targetRef.current;
-      const map=A.aladin('#sky-map',{survey:SURVEYS[surveyRef.current].id,target:`${t.ra} ${t.dec}`,fov:t===ORION?1.4:.35,
+      const map=engine.aladin('#sky-map',{survey:SURVEYS[surveyRef.current].id,target:`${t.ra} ${t.dec}`,fov:t===ORION?1.4:.35,
         cooFrame:'ICRSd',showReticle:true,reticleColor:'#dfcb94',reticleSize:25,showZoomControl:false,showFullscreenControl:false,
         showLayersControl:false,showGotoControl:false,showShareControl:false,showFrame:false,
         showProjectionControl:false,showSimbadPointerControl:false,showContextMenu:false,
         showCooGridControl:false,showSettingsControl:false,showStatusBar:false});
-      mapRef.current=map;
-      map.on('positionChanged',({ra,dec})=>onCenter({ra,dec}));
-      onCenter({ra:t.ra,dec:t.dec}); onState('ready'); clearTimeout(timeout);
-    }).catch(()=>{if(!cancelled){onState('error');clearTimeout(timeout);}});
-    return()=>{cancelled=true;clearTimeout(timeout);};
+      connect(map);onError('');onState('ready');
+    }).catch(fallback);
+    return()=>{cancelled=true;active?.destroy?.();mapRef.current=null;};
   },[]);
   useEffect(()=>{if(mapRef.current){mapRef.current.gotoRaDec(target.ra,target.dec);mapRef.current.setFoV(target===ORION ? 1.4 : .35);}},[target]);
-  useEffect(()=>{if(mapRef.current) mapRef.current.setBaseImageLayer(SURVEYS[survey].id);},[survey]);
+  useEffect(()=>{if(mapRef.current)mapRef.current.setBaseImageLayer(SURVEYS[survey].id);},[survey]);
   return html`<div id="sky-map" role="region" aria-label="Interactive sky map. Drag to pan and scroll to zoom."/>`;
 }
 function Modal({title,onClose,children}) {
@@ -96,7 +118,7 @@ function App() {
   const [initial]=useState(initialState);
   const [target,setTarget]=useState(initial.target),[query,setQuery]=useState(''),[fov,setFov]=useState(initial.fov),[band,setBand]=useState(initial.band);
   const [raInput,setRaInput]=useState(initial.target.ra.toFixed(6)),[decInput,setDecInput]=useState(initial.target.dec.toFixed(6));
-  const [center,setCenter]=useState(initial.target),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading');
+  const [center,setCenter]=useState(initial.target),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading'),[mapError,setMapError]=useState('');
   const [panel,setPanel]=useState(false),[about,setAbout]=useState(false),[grid,setGrid]=useState(false),[toast,setToast]=useState('');
   const [mode,setMode]=useState('atlas'),[busy,setBusy]=useState(false),[resolving,setResolving]=useState(false),[status,setStatus]=useState(null);
   const [data,setData]=useState(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1000);
@@ -214,9 +236,9 @@ function App() {
       <button className="icon-button mobile-menu" aria-label="Toggle search panel" aria-expanded=${panel} onClick=${()=>setPanel(v=>!v)}><${Icon} name=${panel?'cross':'menu'}/></button></div>
     </header>
     <main className="workspace">
-      <${SkyMap} mapRef=${mapRef} target=${target} survey=${survey} onCenter=${setCenter} onState=${setMapState}/>
+      <${SkyMap} mapRef=${mapRef} target=${target} survey=${survey} onCenter=${setCenter} onState=${setMapState} onError=${setMapError}/>
       <div className="map-shade"></div>
-      ${mapState!=='ready' ? html`<div className="map-message" role="status"><${Icon} name=${mapState==='error'?'layers':'star'} size=${26}/><strong>${mapState==='error'?'The sky map couldn’t connect':mapState==='slow'?'The sky survey is taking a little longer':'Opening the sky atlas'}</strong><p>${mapState==='error'?'CDS Aladin is unavailable or blocked by your browser. SPHEREx search works independently.':'Real survey tiles load from CDS. You can choose a target while they arrive.'}</p>${mapState==='error'||mapState==='slow'?html`<button className="subtle-button" onClick=${()=>location.reload()}>Retry map</button>`:html`<span className="loading-line"></span>`}</div>`:null}
+      ${mapState!=='ready' ? html`<div className="map-message" role="status"><${Icon} name=${mapState==='error'?'layers':'star'} size=${26}/><strong>${mapState==='error'?'The survey image couldn’t load':mapState==='slow'?'The sky survey is taking a little longer':'Opening the sky atlas'}</strong><p>${mapState==='error'?(mapError||'The survey service did not respond. Retry the map below.'):'Loading real survey imagery. You can choose a target while it arrives.'}</p>${mapState==='error'||mapState==='slow'?html`<button className="subtle-button" onClick=${()=>{setMapError('');setMapState('loading');if(mapRef.current?.retry)mapRef.current.retry();else location.reload();}}>Retry map</button>`:html`<span className="loading-line"></span>`}</div>`:null}
       <aside className=${`explorer panel ${panel?'is-open':''}`} aria-label="Find and select a sky patch">
         <div className="explorer-intro"><span className="eyebrow">AN OPEN SKY EXPLORER</span><h1>A sky that never<br/>stands still.</h1><p>Find a patch. Look closer. Watch it change.</p></div>
         <form className="search-box" onSubmit=${locate}><${Icon} name="search" size=${18}/><input aria-label="Search object or coordinates" value=${query} onChange=${e=>setQuery(e.target.value)} placeholder="Object name or RA, Dec"/><button aria-label="Find target" disabled=${resolving}>${resolving?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button></form>
@@ -264,7 +286,7 @@ function App() {
       <footer className="map-credit"><span>${mode==='atlas'?SURVEYS[survey].credit:'SPHEREx · NASA / JPL / Caltech · IRSA'}</span><button onClick=${()=>setAbout(true)}>Data & credits</button></footer>
       ${toast?html`<div className="toast" role="status">${toast}</div>`:null}
     </main>
-    ${about?html`<${Modal} title="A real sky. A changing sky." onClose=${()=>setAbout(false)}><p>SkyMotion lets you explore a sky survey and compare infrared observations from NASA’s SPHEREx mission.</p><div className="about-section"><h3>The colorful atlas</h3><p>DSS, 2MASS, and WISE are real astronomical surveys displayed through CDS Aladin. Their color composites combine telescope bands; they are reference maps, not SPHEREx frames or a view of how the sky looks to your eyes.</p></div><div className="about-section"><h3>The SPHEREx sequence</h3><p>Each grayscale frame comes from an IRSA FITS science image. Exposures are resampled onto one north-up, east-left coordinate grid. Playback waits for the current frame to load.</p><p>Frames use independent intensity stretches. Wavelength, detector noise, flagged pixels, and PSF changes can imitate variability. Compare metadata before interpreting changes. Flag percentages count any nonzero flag; these pixels are not automatically rejected.</p></div><div className="about-section"><h3>Looking for motion</h3><p>Start with the five challenge targets, choose a detector, and load exposures. Use the arrow keys to step through. Gaia rings use approximate linear proper motion; missing rings do not establish a new discovery. Suggested target coordinates are finding positions, not date-propagated ephemerides. Fast-moving targets open a wider cutout to include their more recent positions.</p></div><p className="credit-line">Independent NASA Space Apps project. Not an official NASA product.<br/>Data: NASA / JPL / Caltech / IPAC, STScI, UMass, UCLA, ESA Gaia. Sky viewer and name lookup: CDS Aladin / Sesame.</p><div className="about-links"><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noreferrer">SPHEREx at IRSA ↗</a><a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noreferrer">CDS Aladin ↗</a></div></${Modal}>`:null}
+    ${about?html`<${Modal} title="A real sky. A changing sky." onClose=${()=>setAbout(false)}><p>SkyMotion lets you explore a sky survey and compare infrared observations from NASA’s SPHEREx mission.</p><div className="about-section"><h3>The colorful atlas</h3><p>DSS, 2MASS, and WISE are real astronomical surveys displayed with CDS Aladin or the built-in survey-image atlas. Their color composites combine telescope bands; they are reference maps, not SPHEREx frames or a view of how the sky looks to your eyes.</p></div><div className="about-section"><h3>The SPHEREx sequence</h3><p>Each grayscale frame comes from an IRSA FITS science image. Exposures are resampled onto one north-up, east-left coordinate grid. Playback waits for the current frame to load.</p><p>Frames use independent intensity stretches. Wavelength, detector noise, flagged pixels, and PSF changes can imitate variability. Compare metadata before interpreting changes. Flag percentages count any nonzero flag; these pixels are not automatically rejected.</p></div><div className="about-section"><h3>Looking for motion</h3><p>Start with the five challenge targets, choose a detector, and load exposures. Use the arrow keys to step through. Gaia rings use approximate linear proper motion; missing rings do not establish a new discovery. Suggested target coordinates are finding positions, not date-propagated ephemerides. Fast-moving targets open a wider cutout to include their more recent positions.</p></div><p className="credit-line">Independent NASA Space Apps project. Not an official NASA product.<br/>Data: NASA / JPL / Caltech / IPAC, STScI, UMass, UCLA, ESA Gaia. Sky viewer and name lookup: CDS Aladin / Sesame.</p><div className="about-links"><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noreferrer">SPHEREx at IRSA ↗</a><a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noreferrer">CDS Aladin ↗</a></div></${Modal}>`:null}
     ${notesOpen&&o?html`<${Modal} title="Exposure notes" onClose=${()=>setNotesOpen(false)}><p>${date(o.date)} · ${band} · ${o.collection.replace('spherex_','').toUpperCase()}</p><p>Center wavelength: ${info?.wavelength_um?`${info.wavelength_um.toFixed(3)} µm`:'not available'}<br/>Flagged pixels: ${info?.flagged_fraction!=null?`${(info.flagged_fraction*100).toFixed(1)}%`:'not available'}</p><label className="checkbox-row"><input type="checkbox" checked=${gaia} onChange=${e=>setGaia(e.target.checked)}/> Gaia DR3 overlay</label>${gaiaError?html`<p>${gaiaError}</p>`:null}<p className="science-note">Each frame has its own intensity stretch. Wavelength, PSF, and flagged pixels can imitate changes. Compare metadata before interpreting variability.</p><button className="subtle-button" onClick=${()=>{setNotesOpen(false);measure();}}>Measure brightness proxy</button><button className="text-button" style=${{marginLeft:14}} onClick=${downloadMetadata}>Save metadata</button></${Modal}>`:null}
     ${photOpen?html`<${Modal} title="Exploratory brightness" onClose=${()=>setPhotOpen(false)}>${measuring?html`<p className="measurement-loading"><span className="spinner"></span> Measuring up to 12 exposures. This can take several minutes.</p>`:phot?.error?html`<p role="alert">${phot.error}</p>`:phot?html`<p>${phot.warning}</p><div className="measurement-table"><table><thead><tr><th>Date · UTC</th><th>Center µm</th><th>Brightness proxy</th></tr></thead><tbody>${phot.measurements.map(m=>html`<tr key=${m.index}><td>${date(m.date)}</td><td>${m.wavelength_um?.toFixed(3)||'—'}</td><td>${Number.isFinite(m.proxy)?m.proxy.toPrecision(5):'Unavailable'}</td></tr>`)}</tbody></table>${!phot.measurements.length?html`<p>No usable aperture measurements in these frames.</p>`:null}</div>`:null}</${Modal}>`:null}
   </div>`;

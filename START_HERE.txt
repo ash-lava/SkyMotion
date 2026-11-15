@@ -1,10 +1,10 @@
-SKYMOTION — UPDATE YOUR EXISTING GITHUB + RENDER APP
+SKYMOTION 2.0.1 — MAP LOADER FIX / GITHUB + RENDER UPDATE
 
 You do not need a new repository, a new Render service, npm, or an API key.
 The app is React + a Python API, and keeps the same flat file layout.
 
 1. UNZIP THE DOWNLOAD
-   Extract SkyMotion-update.zip on your computer.
+   Extract SkyMotion-map-fix.zip on your computer.
    Open the extracted folder. You should see server.py, archive_client.py,
    app.js, index.html, style.css, requirements.txt, and the other files.
 
@@ -19,7 +19,8 @@ The app is React + a Python API, and keeps the same flat file layout.
    Drag ALL the extracted files into the upload area.
    Upload the FILES INSIDE the folder, not the ZIP or its outer folder.
    Files with the same names replace their old versions.
-   Make sure archive_client.py and test_server.py are included: they are new.
+   Make sure sky_service.py and sky-atlas.js are included: they are new.
+   Also include archive_client.py and test_server.py from the previous update.
    Keep the supplied React, ReactDOM, and htm files beside server.py.
    You do not need to delete the existing repository first.
 
@@ -75,7 +76,7 @@ The app is React + a Python API, and keeps the same flat file layout.
 
 9. QUICK CHECK
    Open https://skymotion-sk2p.onrender.com/api/health
-   Look for version "2.0.0" and collections ["spherex_dr1"].
+   Look for version "2.0.1" and collections ["spherex_dr1"].
 
    In the app, choose Barnard's Star, then Load SPHEREx exposures.
    Its wider preset includes room for its large proper motion.
@@ -116,14 +117,16 @@ IF SOMETHING STILL DOES NOT LOAD
   cannot force IRSA to be online. The map is independent of the SPHEREx API.
 - No matching exposures: try a different detector or target. No fake frames
   are supplied to make an empty field look successful.
-- Sky map unavailable: allow aladin.cds.unistra.fr and survey tile requests
-  in browser/privacy extensions. Aladin v3 also needs WebGL support.
+- Sky map unavailable: after at most 8 seconds, the built-in atlas should
+  take over if Aladin cannot initialize. Open /?atlas=basic to skip Aladin.
+  Use Retry map to repeat a failed image request. Check the image URL in
+  MAP_FIX_README.txt; a JSON error there identifies an upstream service issue.
 - First request is slow: allow time for Render startup and archive responses.
 
 VALIDATION STATUS
 
-The editing workspace passed 22 Python API/archive tests and 10 React/htm
-state tests. Three additional Astropy tests are included but could not run
+The editing workspace passed 30 Python API/archive tests, 10 React/htm
+state tests, 10 atlas geometry/lifecycle tests, and 4 loader integration tests. Three additional Astropy tests are included but could not run
 there because Astropy could not be installed. Browser rendering and direct
 requests to Render/IRSA/CDS were also restricted in that workspace.
 The build command runs all Python tests on Render after dependencies install.

@@ -24,8 +24,10 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 app = FastAPI(title='SkyMotion', version=VERSION)
+from sky_service import router as sky_router
+app.include_router(sky_router)
 STATE_LOCK = threading.RLock()
 IMAGE_LOCK = threading.Lock()  # bound memory / simultaneous FITS decoding on small Render instances
 FRAMES, GAIA = OrderedDict(), OrderedDict()
@@ -320,7 +322,7 @@ def resolve(q: str = Query(..., min_length=2, max_length=100)):
     except Exception:
         raise HTTPException(404, 'Target not found. Try a SIMBAD name or coordinates such as 133.79513, -7.24515.')
 
-ASSETS = {'app.js', 'style.css', 'react.production.min.js', 'react-dom.production.min.js', 'htm.js'}
+ASSETS = {'app.js', 'sky-atlas.js', 'style.css', 'react.production.min.js', 'react-dom.production.min.js', 'htm.js'}
 
 @app.get('/static/{name}')
 @app.get('/static/vendor/{name}')
