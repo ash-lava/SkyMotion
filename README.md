@@ -1,6 +1,6 @@
 # SkyMotion
 
-React front end (no build step, flat layout so files upload without folders; React and htm vendored) served by the FastAPI backend in `server.py`.
+React front end (no build step, served by the FastAPI backend in `server.py`.
 
 **Free deploy (Render, no Docker):** put these files in a GitHub repo, then Render > New > Blueprint > pick the repo. Uses `render.yaml`.
 
