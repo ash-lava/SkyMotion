@@ -1,49 +1,43 @@
-SkyMotion 2.0.4 — validation, 15 November 2026 (UTC)
+SkyMotion 2.0.5 — validation, 15 November 2026 (UTC)
 
-BASE
-b46aaa2, the merged live-IRSA-search update, version 2.0.3.
-The production /api/health reported 2.0.3 during investigation. The changes
-below are a proposed code update; a production deployment is not implied.
+BASE AND PURPOSE
+26c642d, the merged IRSA atlas repair, version 2.0.4.
+The atlas now navigates freely beyond the selected target. The map center
+and zoom are independent of the selected SPHEREx patch and cutout width.
 
-REPRODUCED FAULT
-GET https://skymotion-sk2p.onrender.com/api/sky.jpg with the M101 center,
-0.35-degree field and 400 x 300 output returned HTTP 503 in 11.4 seconds.
-Its upstream details reported a CDS HTTP 404 and an unresponsive backup.
-Direct checks also returned 404 for the CDS primary HiPS2FITS address and
-the Aladin script address; the CDS backup returned a connection failure.
-This does not establish that every CDS service is down or the fault permanent.
+BEHAVIOR
+- A 6-degree surrounding view opens by default. Any valid decimal RA/Dec
+  can be entered in the visible coordinate form, including celestial poles.
+- Selecting coordinates or a preset retains the atlas zoom.
+- All sky displays the complete sphere using Hammer-Aitoff projection.
+  Local views up to 60 degrees retain TAN projection; wider values control
+  overview zoom, with 360 fitting the full sphere on landscape or portrait.
+- Drag, scroll/pinch, zoom buttons and keyboard controls navigate the map.
+  RA wraps through zero. A selected target is a marker, not a map boundary.
+- Switching views restores the last atlas position, zoom and grid state.
+  Shared links save atlas_ra, atlas_dec and atlas_fov separately from the
+  selected SPHEREx coordinates and 1-12 arcminute cutout width.
+- Use this sky position selects the current center without resetting zoom.
+  Suggested places are expandable; coordinates remain prominent in atlas mode.
 
-IRSA's HiPS registry and exact DSS/2MASS/AllWISE mirror properties returned
-HTTP 200. Their registry gives the case-sensitive survey base paths used
-by hips_survey.py. All three surveys use equatorial coordinates and 512-pixel
-JPEG tiles; maximum tile orders are 9, 9 and 8 respectively.
-
-CHANGE
-The atlas uses the existing built-in map directly and requests its images
-from the same-origin /api/sky.jpg API. The server downloads real public IRSA
-survey tiles, projects them to the requested north-up/east-left ICRS TAN grid,
-and returns a JPEG. No external map script, WebGL or CDS HiPS2FITS request is
-needed. Existing drag/pan, zoom, survey selection and grid controls remain.
-The live SPHEREx archive search and FITS processing logic is unchanged.
-
-The renderer uses Astropy HEALPix, added to requirements.txt, and follows
-IVOA HiPS 1.0 JPEG tile orientation: even nested bits select rows, odd bits
-select columns. It samples nearest tile pixels, so this remains a reference
-map rather than a flux-conserving science reduction.
-
-Resource bounds: at most 12 tiles per view, at most four concurrent tile
-requests, 1.5 MB per tile download, strict 512 x 512 JPEG validation, 16 MB
-tile cache, 20 MB finished-image cache, one reprojection at a time and 64-row
-coordinate strips. A request needing too many tiles uses a lower tile order.
-Only fixed IRSA survey paths are downloaded. Failed tiles are not cached.
+GEOMETRY
+The browser and server share TAN / inverse Hammer-Aitoff geometry. Wide-view
+rotation handles both exact poles. Invalid pixels outside the all-sky ellipse
+are masked before HEALPix lookup; they are rendered blank. TAN's LONPOLE is
+explicitly 180 degrees so orientation also matches at the exact north pole.
+Nearest-pixel sampling and the existing fixed-source/tile/memory bounds remain.
 
 AUTOMATED CHECKS
-59 Python unittest cases passed with Astropy 7.2.3, Astropy HEALPix 1.1.3,
-SciPy 1.17.0 and Pillow 12.3.0.
-16 React/htm state checks passed.
-10 atlas geometry/lifecycle checks passed.
-4 React map lifecycle integration checks passed.
-JavaScript syntax and git whitespace checks passed.
+63 Python unittest cases passed.
+22 React/htm frontend state checks passed.
+15 atlas geometry/lifecycle checks passed.
+5 map lifecycle integration checks passed.
+Total: 105 automated checks. JavaScript syntax and git whitespace checks passed.
+
+New checks verify all-sky coordinates against independent Astropy WCS,
+portrait/landscape full-sky coverage, exact poles, masking outside the ellipse,
+RA wrapping, stable map zoom, independent map/target URLs, coordinate entry,
+map restoration on mount, and independent SPHEREx cutout size.
 
 Run:
 python -m unittest -q test_server.py
@@ -51,65 +45,47 @@ node test_frontend.cjs
 node test_sky_atlas.cjs
 node test_map_loader.cjs
 
-New tests cover fixed tile addresses, input bounds, image validation,
-retry after failure, tile-cache expiry/eviction, independent image-cache
-identities, known HEALPix quadrant orientation, north-up/east-left rendering
-across RA wrap, reduced tile work at lower orders, map ready/error states,
-and ignoring late callbacks after the map is destroyed.
-Existing live-search, CSV parsing, WCS alignment, chronological sampling,
-frame errors, caching and playback regressions remain covered.
+LIVE HTTP IMAGE CHECKS
+Actual IRSA survey downloads through the new backend, 900 x 500 images:
+- Full sky, RA 210.80227, Dec +54.34895, zoom width 360, DSS:
+  HTTP 200 in 2.42 seconds.
+- Distant field, RA 83.82208, Dec -5.39111, field 6 degrees, DSS:
+  HTTP 200 in 1.12 seconds.
+- Exact north pole, RA 0, Dec +90, zoom width 360, WISE:
+  HTTP 200 in 1.04 seconds.
 
-GENUINE LIVE IMAGE CHECKS
-Fresh M101 reference maps at RA 210.80227, Dec +54.34895, 0.35-degree field,
-800 x 600 output, through the actual new renderer:
-- DSS:    HTTP-successful tile downloads, valid JPEG, 1.92 seconds.
-- 2MASS:  HTTP-successful tile downloads, valid JPEG, 0.94 seconds.
-- WISE:   HTTP-successful tile downloads, valid JPEG, 0.68 seconds.
+Final backend also returned actual 600 x 400, 3-degree TAN images centered
+at RA 123.456, Dec -90 and +90: HTTP 200 in 2.78 and 1.89 seconds.
 
-Actual /api/sky.jpg checks for additional geometry:
-- RA 359.99, Dec 0, width 3 degrees: HTTP 200, 320 x 240, 2.54 seconds.
-- RA 120, Dec +89.8, width 6 degrees: HTTP 200, 320 x 240, 0.52 seconds.
+EIGHT UNMOCKED MAP BROWSER CHECKS
+1. Broad surrounding field opens, with visible coordinate entry.
+2. All sky displays the complete sphere using real IRSA imagery.
+3. A jump to a far coordinate pair preserves the chosen overview zoom.
+4. Dragging across RA 360 wraps into RA zero, far from the selected target.
+5. Sharing/reloading restores the independently panned map center and zoom.
+6. Switching to sequence and back retains map position and zoom.
+7. Adopting the current center for SPHEREx retains the surrounding map field.
+8. Full sky fits a phone without horizontal overflow; coordinate entry works.
 
-The largest allowed 1400 x 1400 map also returned HTTP 200 in 2.67 seconds.
-The local server process recorded a peak resident size of about 275 MiB
-after this check; that observation is not a guarantee for every workload.
+These scenarios made no SPHEREx metadata request and used no response mocks.
+There were no JavaScript runtime errors. docs/all-sky-* screenshots show real
+IRSA DSS reference imagery. The earlier docs/atlas-* and docs/sequence-*
+screenshots also contain real archive imagery from previous verification.
 
-NINE UNMOCKED CHROMIUM CHECKS
-- A cold atlas page loaded real DSS imagery in 2.7 seconds.
-- Live 2MASS selection rendered successfully.
-- Live WISE selection rendered successfully.
-- Switching back to DSS rendered successfully.
-- Coordinate grid control remained available.
-- Zoom changed the requested field width and loaded the image.
-- Drag/pan changed coordinates and loaded the new field.
-- Phone resize loaded matching dimensions without horizontal overflow;
-  the target panel opened and closed.
-- A separate default sequence page completed a fresh live SPHEREx SIA2
-  search, returned 16 M101 observations and rendered its actual FITS frame.
-  That sequence page made no atlas image request.
+SEPARATE LIVE SPHEREX REGRESSION
+A page restored with atlas_fov=360 and a 6-arcminute SPHEREx cutout completed
+a live IRSA search and displayed its actual FITS frame. The observation API
+request used fov=6, not 360. It made no atlas image request and produced no
+JavaScript runtime errors. Thus the new global map zoom does not enlarge or
+break the SPHEREx science cutout.
 
-No browser response mocks or injected observation listings were used in
-these live checks. There were no JavaScript runtime errors and no requests
-to an external Aladin script or CDS map endpoint. Screenshots in docs/atlas-*
-show actual live IRSA survey images. Earlier docs/sequence-* screenshots are
-also genuine IRSA observations from the preceding 2.0.3 verification.
+LIMITS AND DEPLOYMENT
+Verified locally against live IRSA services, not after a Render deployment.
+Survey plate boundaries and uneven backgrounds can be visible at whole-sky
+scale. These are reference composites, not a live camera or calibrated
+photometry. The atlas is reprojected after navigation rather than streaming
+progressive tiles in the browser. External data-service failures remain
+possible. SPHEREx still returns limited samples, not a complete survey census.
 
-LIMITS
-Live success was verified locally against IRSA, not after deploying the new
-code to Render. External archive failures remain possible. The atlas shows
-reference composites from older surveys; live retrieval is not a live camera
-feed. It does not supply new SPHEREx epochs. Reprojection cannot add angular
-resolution and nearest-pixel sampling is unsuitable for calibrated photometry.
-
-SPHEREx still returns a limited live sample of 16 or 4 records per collection;
-that is not a complete survey inventory. Independent display stretches,
-center wavelength changes, processing differences and flags can imitate
-variability. All five challenge targets are not claimed as verified here.
-The optional Sesame and Gaia services were not revalidated in this change.
-
-DEPLOYMENT
-Merge the supplied pull request and let Render auto-deploy main, or use
-Manual Deploy > Deploy latest commit. requirements.txt installs the new
-Astropy HEALPix dependency automatically. No new environment variable,
-API key or separate hosting service is required. /api/health should report
-2.0.4; then verify an actual atlas image and a SPHEREx exposure in the UI.
+Merge the new PR, let Render deploy main, and confirm /api/health reports
+2.0.5. No dependency or environment change is required relative to 2.0.4.

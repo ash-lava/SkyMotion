@@ -1,41 +1,35 @@
-SKYMOTION 2.0.4 — RESTORE THE REFERENCE SKY ATLAS
+SKYMOTION 2.0.5 — FREE SKY NAVIGATION
 
-1. Open the supplied pull request on GitHub while signed in as ash-lava.
-   Scroll down, select Merge pull request, then Confirm merge.
+1. Open the supplied pull request while signed into GitHub as ash-lava.
+   Select Merge pull request, then Confirm merge.
 
-2. Let Render auto-deploy main. If automatic deployment is off, open:
+2. Let Render deploy main automatically, or use:
    Render Dashboard > SkyMotion > Manual Deploy > Deploy latest commit.
+   No new package, API key or environment setting is needed beyond 2.0.4.
 
-   Build and start commands stay the same:
-   pip install -r requirements.txt && python -m unittest -q test_server.py
-   uvicorn server:app --host 0.0.0.0 --port $PORT
+3. Check https://skymotion-sk2p.onrender.com/api/health for version 2.0.5.
+   Hard-refresh the website after deployment.
 
-   One added dependency, astropy-healpix, installs automatically from
-   requirements.txt. Include the new hips_survey.py in the checkout.
-   Keep SPHEREX_COLLECTIONS=spherex_dr1. No API key or new setting is needed.
-
-3. Open https://skymotion-sk2p.onrender.com/api/health
-   Wait until the version is 2.0.4, then hard-refresh the app.
-   Windows/Linux: Ctrl+Shift+R. Mac: Command+Shift+R.
-
-4. Select Sky atlas. You should see real M101 reference imagery.
-   Try DSS, 2MASS and WISE from the survey selector, then drag or zoom.
-   On a phone, the layers icon opens survey selection.
-
-   Direct atlas link:
+4. Open Sky atlas, or use:
    https://skymotion-sk2p.onrender.com/?mode=atlas
 
-5. Select SPHEREx sequence and load exposures to check that feature too.
-   The default home page still starts its live M101 SPHEREx search.
+   - Drag anywhere to explore beyond the selected object.
+   - Scroll/pinch or use +/- to zoom. All sky shows the complete sphere.
+   - Enter any valid RA/Dec under Go to any RA / Dec.
+     RA: 0 up to, but excluding, 360 degrees. Dec: -90 through +90 degrees.
+   - Choosing coordinates or a suggested place preserves the atlas zoom.
+   - The selected SPHEREx patch is a marker, not a limit on map coverage.
+   - Use this sky position selects the map center for an exposure search.
+   - Return to selected patch recenters the map without changing its zoom.
+   - Share patch preserves the map's actual center and zoom.
 
-The new atlas uses IRSA's public reference-survey tiles and the built-in map.
-It no longer loads the broken CDS map-script or HiPS2FITS service addresses.
-Reference-survey images are distinct from dated SPHEREx science exposures.
-Both paths fetch real archive data. There is no saved demonstration sequence.
+The map location/zoom and SPHEREx cutout are independent. Switching to the
+sequence and back keeps the map where you left it. An all-sky overview does
+not request a whole-sky SPHEREx cutout; exposure cutouts remain 1-12 arcmin.
 
-A healthy /api/health means the app server is running; it does not guarantee
-that an external data provider will answer every request. If an image fails,
-use Retry map and save the exact error plus the coordinates and survey.
+All images come from live IRSA archive products. No fixed demonstration
+field limits the map. External service failures remain possible; Retry map
+retries a failed image. Some surveys show plate boundaries and uneven
+backgrounds when viewed at very large scales.
 
-HOW_IT_WORKS.txt explains the entire system in beginner-friendly language.
-VALIDATION.txt records what was tested and which checks used live services.
+See HOW_IT_WORKS.txt for the beginner guide and VALIDATION.txt for evidence.

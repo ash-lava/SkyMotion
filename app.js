@@ -11,6 +11,7 @@ const ICONS = {
   back: 'M6 5v14M18 5l-9 7 9 7V5', next: 'M18 5v14M6 5l9 7-9 7V5',
   play: 'M8 4l12 8-12 8V4', pause: 'M8 5v14M16 5v14',
   refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2',
+  globe: 'M22 12a10 10 0 1 0-20 0 10 10 0 0 0 20 0M2 12h20M12 2c-6 5-6 15 0 20M12 2c6 5 6 15 0 20',
   grid: 'M3 3h18v18H3V3M3 9h18M3 15h18M9 3v18M15 3v18',
   menu: 'M4 6h16M4 12h16M4 18h16', star: 'M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2',
   download: 'M12 3v12M7 10l5 5 5-5M4 16v5h16v-5'
@@ -26,7 +27,6 @@ const TARGETS = [M101,
   {name: 'RW Aurigae', ra:76.9565260, dec:30.4014382, type:'Variable star', tag:'04'},
   {name: 'R Draconis', ra:248.1676075, dec:66.7549842, type:'Variable star', tag:'05'}
 ];
-const ORION = {name:'Orion Nebula', ra:83.82208, dec:-5.39111, type:'A place to start', tag:'M42'};
 const SURVEYS = {
   dss: {id:'P/DSS2/color', label:'DSS · Optical color', short:'DSS2 color', credit:'DSS / STScI · IRSA'},
   mass: {id:'P/2MASS/color', label:'2MASS · Near-infrared', short:'2MASS infrared', credit:'2MASS / UMass / IPAC · IRSA'},
@@ -52,29 +52,40 @@ async function api(url, signal) {
 function initialState() {
   const p = new URLSearchParams(location.search), ra = Number(p.get('ra')), dec = Number(p.get('dec'));
   const valid = p.has('ra') && p.has('dec') && Number.isFinite(ra) && Number.isFinite(dec) && ra>=0 && ra<360 && dec>=-90 && dec<=90;
-  return {target:valid ? {name:'Selected sky patch',ra,dec,type:'Shared coordinates'} : M101,
+  const target=valid ? {name:'Selected sky patch',ra,dec,type:'Shared coordinates'} : M101;
+  const ar=Number(p.get('atlas_ra')),ad=Number(p.get('atlas_dec')),af=Number(p.get('atlas_fov'));
+  const atlasValid=p.has('atlas_ra')&&p.has('atlas_dec')&&Number.isFinite(ar)&&Number.isFinite(ad)&&ar>=0&&ar<360&&ad>=-90&&ad<=90;
+  return {target,view:{ra:atlasValid?ar:target.ra,dec:atlasValid?ad:target.dec,fov:Number.isFinite(af)&&af>=.01&&af<=360?af:6},
     fov:[1,2,3,6,12].includes(+p.get('fov')) ? +p.get('fov') : (valid ? 3 : 6),
     band:DETECTORS[p.get('band')] ? p.get('band') : 'D2',
     survey:SURVEYS[p.get('layer')] ? p.get('layer') : 'dss',
     auto:valid ? p.get('mode')==='sequence' : !p.has('ra')&&!p.has('dec')&&p.get('mode')!=='atlas'&&!p.has('atlas')};
 }
-function SkyMap({mapRef,target,survey,onCenter,onState,onError}) {
+function SkyMap({mapRef,target,view={ra:target.ra,dec:target.dec,fov:6},survey,grid=false,onCenter,onState,onError}) {
+  const priorTarget=useRef(target);
   useEffect(()=>{
     let cancelled=false,active=null;
     onError('');onState('loading');
     try{
       const map=window.SkyAtlas.create(document.getElementById('sky-map'),{
-        ra:target.ra,dec:target.dec,fov:target===ORION?1.4:.35,survey:SURVEYS[survey].id});
+        ra:view.ra,dec:view.dec,fov:view.fov,survey:SURVEYS[survey].id});
       active=map;mapRef.current=map;
-      map.on('positionChanged',({ra,dec})=>{if(!cancelled)onCenter({ra,dec});});
+      map.on('positionChanged',position=>{if(!cancelled)onCenter(position);});
       map.on('loading',()=>{if(!cancelled&&!map.shown)onState('loading');});
       map.on('ready',()=>{if(!cancelled){onError('');onState('ready');}});
       map.on('error',error=>{if(!cancelled){onError(error.message);onState('error');}});
-      onCenter({ra:target.ra,dec:target.dec});
+      onCenter({...view});
     }catch(error){onError('The map could not start: '+error.message);onState('error');}
     return()=>{cancelled=true;active?.destroy();mapRef.current=null;};
   },[]);
-  useEffect(()=>{if(mapRef.current){mapRef.current.gotoRaDec(target.ra,target.dec);mapRef.current.setFoV(target===ORION?1.4:.35);}},[target]);
+  useEffect(()=>{
+    if(mapRef.current){
+      if(priorTarget.current!==target)mapRef.current.gotoRaDec(target.ra,target.dec);
+      mapRef.current.setSelection?.(target);
+    }
+    priorTarget.current=target;
+  },[target]);
+  useEffect(()=>{mapRef.current?.setCooGrid?.({enabled:grid});},[grid]);
   useEffect(()=>{if(mapRef.current)mapRef.current.setBaseImageLayer(SURVEYS[survey].id);},[survey]);
   return html`<div id="sky-map" role="region" aria-label="Interactive sky map. Drag to pan and scroll to zoom."/>`;
 }
@@ -89,7 +100,7 @@ function App() {
   const [initial]=useState(initialState);
   const [target,setTarget]=useState(initial.target),[query,setQuery]=useState(''),[fov,setFov]=useState(initial.fov),[band,setBand]=useState(initial.band);
   const [raInput,setRaInput]=useState(initial.target.ra.toFixed(6)),[decInput,setDecInput]=useState(initial.target.dec.toFixed(6));
-  const [center,setCenter]=useState(initial.target),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading'),[mapError,setMapError]=useState('');
+  const [center,setCenter]=useState(initial.view),[survey,setSurvey]=useState(initial.survey),[mapState,setMapState]=useState('loading'),[mapError,setMapError]=useState('');
   const [panel,setPanel]=useState(false),[about,setAbout]=useState(false),[grid,setGrid]=useState(false),[toast,setToast]=useState('');
   const [mode,setMode]=useState(initial.auto?'sequence':'atlas'),[busy,setBusy]=useState(false),[resolving,setResolving]=useState(false),[status,setStatus]=useState(null);
   const [data,setData]=useState(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1000);
@@ -99,7 +110,7 @@ function App() {
   const mapRef=useRef(null), searchRef=useRef(null), resolveRef=useRef(null), blobs=useRef(new Map()), photoRef=useRef(null);
   const obs=data?.observations || [], o=obs[index], frameMatches=frame?.index===index && frame?.key===data?.key;
   const releases = [...new Set(obs.map(row=>row.collection.replace('spherex_', '').replace('_deep', '').toUpperCase()))];
-  const selectedMoved = Math.abs(center.ra-target.ra)>.0001 || Math.abs(center.dec-target.dec)>.0001;
+  const selectedMoved = Math.abs(((center.ra-target.ra+540)%360)-180)>.0001 || Math.abs(center.dec-target.dec)>.0001;
 
   function clearSequence() {
     searchRef.current?.abort(); photoRef.current?.abort();
@@ -107,11 +118,11 @@ function App() {
     blobs.current.forEach(url=>URL.revokeObjectURL(url));blobs.current.clear();
   }
   function choose(t) {
-    resolveRef.current?.abort();setResolving(false);clearSequence();setTarget(t);setCenter(t);
+    resolveRef.current?.abort();setResolving(false);clearSequence();setTarget(t);setCenter(v=>({...v,ra:t.ra,dec:t.dec}));
     setRaInput(t.ra.toFixed(6));setDecInput(t.dec.toFixed(6));if(t.fov)setFov(t.fov);setQuery('');setPanel(false);
   }
   function updateURL(t=target, display=mode) {
-    const p=new URLSearchParams({ra:t.ra,dec:t.dec,fov,band,layer:survey,mode:display});
+    const p=new URLSearchParams({ra:t.ra,dec:t.dec,fov,band,layer:survey,mode:display,atlas_ra:center.ra,atlas_dec:center.dec,atlas_fov:center.fov});
     history.replaceState(null,'',`?${p}`);
     return location.href;
   }
@@ -128,7 +139,7 @@ function App() {
     if(!raInput.trim()||!decInput.trim()||!Number.isFinite(ra)||!Number.isFinite(dec)||ra<0||ra>=360||dec< -90||dec>90) {
       setStatus({error:true,text:'Enter RA from 0 to 359.999° and Dec from −90 to +90°.'});return;
     }
-    choose({name:'Selected sky patch',ra,dec,type:'ICRS coordinates'});
+    choose({name:'Selected sky patch',ra,dec,type:'ICRS coordinates'});setMode('atlas');
   }
   async function loadExposures(refresh=false) {
     searchRef.current?.abort();const controller=new AbortController();searchRef.current=controller;
@@ -187,8 +198,8 @@ function App() {
     window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
   },[mode,obs.length,about,photOpen,notesOpen]);
   function move(direction){setPlaying(false);setIndex(i=>(i+direction+obs.length)%obs.length);}
-  function zoom(factor){if(mapRef.current)mapRef.current.setFoV(Math.min(180,Math.max(.01,mapRef.current.getFov()[0]*factor)));}
-  function toggleGrid(){const next=!grid;setGrid(next);if(mapRef.current){if(mapRef.current.setCooGrid)mapRef.current.setCooGrid({enabled:next,color:'#b4a679',opacity:.45});else mapRef.current.showCooGrid(next);}}
+  function zoom(factor){if(mapRef.current)mapRef.current.setFoV(Math.min(360,Math.max(.01,mapRef.current.getFov()[0]*factor)));}
+  function toggleGrid(){setGrid(v=>!v);}
   async function share(){const url=updateURL();try{await navigator.clipboard.writeText(url);setToast('Link copied. Same patch, same settings.');}catch{setToast('The address bar now contains your shareable link.');}}
   async function measure(){
     setPhotOpen(true);if(phot||measuring)return;
@@ -208,26 +219,26 @@ function App() {
       <button className="icon-button mobile-menu" aria-label="Toggle search panel" aria-expanded=${panel} onClick=${()=>setPanel(v=>!v)}><${Icon} name=${panel?'cross':'menu'}/></button></div>
     </header>
     <main className="workspace">
-      ${mode==='atlas'?html`<${SkyMap} mapRef=${mapRef} target=${target} survey=${survey} onCenter=${setCenter} onState=${setMapState} onError=${setMapError}/>`:null}
+      ${mode==='atlas'?html`<${SkyMap} mapRef=${mapRef} target=${target} view=${center} grid=${grid} survey=${survey} onCenter=${setCenter} onState=${setMapState} onError=${setMapError}/>`:null}
       <div className="map-shade"></div>
       ${mode==='atlas'&&mapState!=='ready' ? html`<div className="map-message" role="status"><${Icon} name=${mapState==='error'?'layers':'star'} size=${26}/><strong>${mapState==='error'?'The survey image couldn’t load':mapState==='slow'?'The sky survey is taking a little longer':'Opening the sky atlas'}</strong><p>${mapState==='error'?(mapError||'The survey service did not respond. Retry the map below.'):'Loading real survey imagery. You can choose a target while it arrives.'}</p>${mapState==='error'||mapState==='slow'?html`<button className="subtle-button" onClick=${()=>{setMapError('');setMapState('loading');if(mapRef.current?.retry)mapRef.current.retry();else location.reload();}}>Retry map</button>`:html`<span className="loading-line"></span>`}</div>`:null}
       <aside className=${`explorer panel ${panel?'is-open':''}`} aria-label="Find and select a sky patch">
         <div className="explorer-intro"><span className="eyebrow">AN OPEN SKY EXPLORER</span><h1>A sky that never<br/>stands still.</h1><p>Find a patch. Look closer. Watch it change.</p></div>
         <form className="search-box" onSubmit=${locate}><${Icon} name="search" size=${18}/><input aria-label="Search object or coordinates" value=${query} onChange=${e=>setQuery(e.target.value)} placeholder="Object name or RA, Dec"/><button aria-label="Find target" disabled=${resolving}>${resolving?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button></form>
-        <div className="selected-target"><div><span className="eyebrow">SELECTED PATCH</span><h2>${target.name}</h2><span className="coordinate-text">${coords(target)}</span></div><button className="icon-button" title="Recenter map" aria-label="Recenter on selected target" onClick=${()=>mapRef.current?.gotoRaDec(target.ra,target.dec)}><${Icon} name="target"/></button></div>
-        <details className="coordinate-details"><summary>Enter exact coordinates <span>+</span></summary><form onSubmit=${applyCoordinates}><div className="input-pair"><label>RA · degrees<input aria-label="Right ascension in degrees" inputMode="decimal" value=${raInput} onChange=${e=>setRaInput(e.target.value)}/></label><label>Dec · degrees<input aria-label="Declination in degrees" inputMode="decimal" value=${decInput} onChange=${e=>setDecInput(e.target.value)}/></label></div><button className="subtle-button">Go to coordinates <${Icon} name="arrow" size=${14}/></button></form></details>
-        <div className="target-list"><div className="section-label"><span className="eyebrow">SOMETHING TO LOOK FOR</span><span className="muted">06 targets</span></div>
+        <div className="selected-target"><div><span className="eyebrow">SPHEREx PATCH</span><h2>${target.name}</h2><span className="coordinate-text">${coords(target)}</span></div><button className="icon-button" title="Recenter map" aria-label="Recenter on selected target" onClick=${()=>mapRef.current?.gotoRaDec(target.ra,target.dec)}><${Icon} name="target"/></button></div>
+        <details className="coordinate-details" open=${mode==='atlas'}><summary>Go to any RA / Dec <span>+</span></summary><form onSubmit=${applyCoordinates}><div className="input-pair"><label>RA · degrees<input aria-label="Right ascension in degrees" inputMode="decimal" value=${raInput} onChange=${e=>setRaInput(e.target.value)}/></label><label>Dec · degrees<input aria-label="Declination in degrees" inputMode="decimal" value=${decInput} onChange=${e=>setDecInput(e.target.value)}/></label></div><button className="subtle-button">Go to coordinates <${Icon} name="arrow" size=${14}/></button></form></details>
+        <details className="target-presets" open=${mode!=='atlas'}><summary className="section-label"><span className="eyebrow">SUGGESTED PLACES</span><span className="muted">${TARGETS.length} places <span className="target-disclosure">⌄</span></span></summary><div className="target-list">
           ${TARGETS.map(t=>html`<button key=${t.name} className=${`target-row ${target.name===t.name?'active':''}`} onClick=${()=>choose(t)}><span className="target-number">${t.tag}</span><span><strong>${t.name}</strong><small>${t.type}</small></span><${Icon} name="arrow" size=${15}/></button>`)}
-        </div>
-        <div className="observation-settings"><div className="input-pair"><label>Cutout size<select aria-label="Cutout size" value=${fov} onChange=${e=>{clearSequence();setFov(+e.target.value);}}>${[1,2,3,6,12].map(v=>html`<option key=${v} value=${v}>${v} arcmin</option>`)}</select></label><label>SPHEREx detector<select aria-label="SPHEREx detector" value=${band} onChange=${e=>{clearSequence();setBand(e.target.value);}}>${Object.keys(DETECTORS).map(b=>html`<option key=${b} value=${b}>${b} · ${DETECTORS[b]}</option>`)}</select></label></div>
+        </div></details>
+        <div className="observation-settings"><div className="input-pair"><label>SPHEREx cutout<select aria-label="Cutout size" value=${fov} onChange=${e=>{clearSequence();setFov(+e.target.value);}}>${[1,2,3,6,12].map(v=>html`<option key=${v} value=${v}>${v} arcmin</option>`)}</select></label><label>SPHEREx detector<select aria-label="SPHEREx detector" value=${band} onChange=${e=>{clearSequence();setBand(e.target.value);}}>${Object.keys(DETECTORS).map(b=>html`<option key=${b} value=${b}>${b} · ${DETECTORS[b]}</option>`)}</select></label></div>
         <button className="primary-button" disabled=${busy||resolving} onClick=${()=>loadExposures()}><span>${busy?'Finding exposures…':'Load SPHEREx exposures'}</span>${busy?html`<span className="spinner"></span>`:html`<${Icon} name="arrow" size=${18}/>`}</button>
         <p className="quiet-note">Real infrared observations from NASA / IPAC.</p></div>
       </aside>
       <div className="map-top-controls"><div className="view-switch" role="group" aria-label="Viewer mode"><button className=${mode==='atlas'?'active':''} onClick=${()=>{setMode('atlas');setPlaying(false);}}>Sky atlas</button><button className=${mode==='sequence'?'active':''} onClick=${()=>setMode('sequence')}>SPHEREx sequence ${obs.length?html`<span>${obs.length}</span>`:null}</button></div>
       <label className="survey-select"><${Icon} name="layers" size=${16}/><span className="sr-only">Sky survey</span><select aria-label="Sky survey" value=${survey} onChange=${e=>setSurvey(e.target.value)}>${Object.entries(SURVEYS).map(([k,s])=>html`<option key=${k} value=${k}>${s.label}</option>`)}</select></label></div>
       ${mode==='atlas'?html`<div className="atlas-center">${selectedMoved?html`<button className="search-area" onClick=${()=>choose({name:'Selected sky patch',ra:center.ra,dec:center.dec,type:'Map selection'})}>Use this sky position <${Icon} name="plus" size=${13}/></button>`:null}</div>`:null}
-      ${mode==='atlas'?html`<div className="map-title"><span className="eyebrow">${SURVEYS[survey].short} / REFERENCE ATLAS</span><h2>${selectedMoved?'The sky is yours to explore.':target.name}</h2><p>${coords(center)} <span>ICRS</span></p></div>`:null}
-      ${mode==='atlas'?html`<div className="map-tools"><span className="north-label">N <span>↑</span></span><div className="tool-stack"><button aria-label="Zoom in" title="Zoom in" disabled=${mapState!=='ready'} onClick=${()=>zoom(.6)}><${Icon} name="plus"/></button><button aria-label="Zoom out" title="Zoom out" disabled=${mapState!=='ready'} onClick=${()=>zoom(1.6)}><${Icon} name="minus"/></button></div><button className=${`map-tool ${grid?'active':''}`} aria-pressed=${grid} aria-label="Toggle coordinate grid" title="Coordinate grid" disabled=${mapState!=='ready'} onClick=${toggleGrid}><${Icon} name="grid"/></button><button className="map-tool" aria-label="Return to Orion Nebula" title="Return to Orion Nebula" onClick=${()=>choose(ORION)}><${Icon} name="target"/></button></div>`:null}
+      ${mode==='atlas'?html`<div className="map-title"><span className="eyebrow">${SURVEYS[survey].short} / REFERENCE ATLAS</span><h2>${center.fov>=360?'Entire sky':selectedMoved?'Sky atlas':target.name}</h2><p>${coords(center)} <span>ICRS</span> <span className="atlas-field">${center.fov>=360?'All sky':center.fov>60?'Wide view':`${center.fov<1?center.fov.toFixed(3):center.fov.toFixed(1)}° field`}</span></p></div>`:null}
+      ${mode==='atlas'?html`<div className="map-tools"><span className="north-label">N <span>↑</span></span><button className="map-tool all-sky-button" aria-label="View entire sky" title="View entire sky" onClick=${()=>mapRef.current?.setFoV(360)}><${Icon} name="globe" size=${16}/><span>All sky</span></button><div className="tool-stack"><button aria-label="Zoom in" title="Zoom in" disabled=${!mapRef.current} onClick=${()=>zoom(.6)}><${Icon} name="plus"/></button><button aria-label="Zoom out" title="Zoom out" disabled=${!mapRef.current} onClick=${()=>zoom(1.6)}><${Icon} name="minus"/></button></div><button className=${`map-tool ${grid?'active':''}`} aria-pressed=${grid} aria-label="Toggle coordinate grid" title="Coordinate grid" disabled=${!mapRef.current} onClick=${toggleGrid}><${Icon} name="grid"/></button><button className="map-tool" aria-label="Return to selected patch" title="Center selected patch" onClick=${()=>mapRef.current?.gotoRaDec(target.ra,target.dec)}><${Icon} name="target"/></button></div>`:null}
       ${mode==='sequence'?html`<section className="sequence-stage" aria-label="SPHEREx observation viewer">
         ${busy?html`<div className="sequence-placeholder"><span className="spinner large"></span><span className="eyebrow">NASA / IPAC INFRARED SCIENCE ARCHIVE</span><h2>Finding this patch in time.</h2><p>Looking for ${band} observations covering ${target.name}.<br/>Archive requests can take a minute or two.</p><button className="subtle-button" onClick=${()=>{searchRef.current?.abort();setBusy(false);setStatus(null);setMode('atlas');}}>Back to the atlas</button></div>`:
         obs.length?html`<div className="frame-layout"><div className="frame-heading"><div><span className="eyebrow">SPHEREx / ${band} / ${fov}′ FIELD</span><h2>${target.name}</h2></div><span className="frame-number">${String(index+1).padStart(2,'0')}<span> / ${String(obs.length).padStart(2,'0')}</span></span></div>

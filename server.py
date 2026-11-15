@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.4'
+VERSION = '2.0.5'
 app = FastAPI(title='SkyMotion', version=VERSION)
 from sky_service import router as sky_router
 app.include_router(sky_router)

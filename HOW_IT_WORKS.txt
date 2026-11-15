@@ -1,5 +1,5 @@
 SKYMOTION: A BEGINNER'S GUIDE
-Applies to version 2.0.4
+Applies to version 2.0.5
 
 You have built a website that runs in more than one place. Understanding
 which part is doing a job makes its error messages much less mysterious.
@@ -75,8 +75,9 @@ that divides the sphere of the sky into addressable areas.
 
 The server downloads the necessary real tiles from IRSA. Astropy HEALPix
 helps it find which survey pixel belongs at each location in the requested
-view. It projects those pixels into a rectangular image with north at the
-top and east on the left, then sends a JPEG to the browser.
+view. Close views use a north-up, east-left projection. Wide views use an
+elliptical projection that can fit the entire sky, with north up at the
+center. The server sends the resulting JPEG to the browser.
 
 This is geometric image processing, not AI image generation. The pixels
 come from actual surveys. Processing does not add telescope resolution.
@@ -89,8 +90,28 @@ sky projection as the image.
 
 The code limits each view to 12 tiles, requesting at most four at a time.
 If a view needs too many tiles at one detail level, it uses a coarser level.
-The largest displayed field dimension is limited to 60 degrees. Those limits
-help keep memory and network work manageable on a small Render instance.
+Those tile limits help keep memory and network work manageable on a small
+Render instance. The map can zoom beyond a 60-degree local field: All sky
+shows the complete sphere. The black area outside that ellipse is outside
+the map projection, not missing astronomical data.
+
+The atlas now remembers its own center and zoom separately from the selected
+SPHEREx patch. A selected object is a marker, not a boundary: drag past it
+and the server loads the next area of the sky. Right Ascension wraps from
+360 back to 0 as you move around the sky.
+
+To explore anywhere, open Sky atlas and enter RA and Dec under Go to any
+RA / Dec. RA accepts 0 up to, but excluding, 360 degrees. Dec accepts -90
+through +90 degrees, including the poles. Selecting Go to coordinates keeps
+your current map zoom. Suggested places are optional shortcuts in an
+expandable list. All sky provides an overview of the complete sphere.
+
+Use this sky position copies the current map center into the selected
+SPHEREx patch without zooming the atlas back in. The SPHEREx cutout size is
+a separate control: a 360-degree atlas overview can still request only a
+6-arcminute SPHEREx science cutout. Switching between views remembers your
+atlas location. Share patch includes the map center and zoom in atlas_ra,
+atlas_dec and atlas_fov, independently of the selected target coordinates.
 
 4. WHAT HAPPENS WHEN YOU LOAD SPHEREX EXPOSURES
 
@@ -240,7 +261,7 @@ astropy-healpix; the existing build installs it automatically. You do not
 need to install it manually in your browser or create another Render service.
 
 After a successful build, Render starts Uvicorn with server:app. Then the
-new version serves requests. In this update, /api/health should show 2.0.4.
+new version serves requests. In this update, /api/health should show 2.0.5.
 Confirm that version and then test an actual atlas image and SPHEREx frame.
 
 10. WHERE THINGS LIVE IN THE PROJECT
@@ -281,7 +302,8 @@ actually contact IRSA and prove that a real request worked at that time.
 Neither substitutes for the other, and a live success is not a promise that
 an outside archive will never fail again.
 
-For the 2.0.4 atlas fix, all three live survey layers, map interaction, phone
-layout and a separate live SPHEREx image were checked. VALIDATION.txt records
+For the 2.0.5 navigation update, all-sky and distant-field images, RA wrapping,
+coordinate entry, restored views, shared links, phone layout and a separate
+live SPHEREx image were checked. VALIDATION.txt records
 the details. Missing tiles remain an explicit error rather than being filled
 with a generated sky or an unrelated saved demonstration image.

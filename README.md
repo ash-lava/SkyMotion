@@ -2,13 +2,21 @@
 
 A React sky explorer with a black and pale-gold interface, live IRSA searches, and WCS-aligned SPHEREx exposure playback. Start with **START_HERE.txt** to update the existing Render service.
 
-## Version 2.0.4: restored sky atlas
+## Version 2.0.5: free sky navigation
+
+Pan beyond the selected object, enter any valid RA/Dec, and zoom out to a complete all-sky overview. The atlas has its own center and zoom, independent of the selected SPHEREx patch. Changing a target keeps your map zoom; switching views or sharing a link preserves the panned location and zoom.
+
+The **All sky** control fits the complete sphere into the viewport. Coordinate entry opens in atlas mode; suggested places remain available in a collapsible list. A marker identifies the selected SPHEREx patch without bounding the map. **Use this sky position** selects the current map center for a later exposure search while preserving the surrounding view.
+
+No dependency or environment change is needed relative to 2.0.4. After deployment, `/api/health` should report **2.0.5**.
+
+## Sky atlas
 
 The atlas now displays real DSS, 2MASS and AllWISE imagery from NASA/IPAC IRSA's public HiPS mirror. It uses the built-in map directly, with no external Aladin script or WebGL requirement. The previous CDS script/image addresses returned 404 or connection failures in the deployed service.
 
-`hips_survey.py` selects the needed survey tiles, projects them onto the requested north-up/east-left ICRS grid and returns a JPEG through `/api/sky.jpg`. Dragging, zooming, survey selection and the coordinate grid remain available. Tile count, downloads, cached bytes and simultaneous reprojection are bounded. This is a reference map built from real survey data; it is separate from SPHEREx exposure playback.
+`hips_survey.py` selects the needed survey tiles, projects them onto the requested ICRS view, with north up at its center and east left and returns a JPEG through `/api/sky.jpg`. Dragging, zooming, survey selection and the coordinate grid remain available. Tile count, downloads, cached bytes and simultaneous reprojection are bounded. This is a reference map built from real survey data; it is separate from SPHEREx exposure playback.
 
-Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.4**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
+Render installs one new dependency, `astropy-healpix`, from `requirements.txt` during the normal build. No new API key or environment variable is required. After deployment, `/api/health` should report **2.0.5**. Read **HOW_IT_WORKS.txt** for a beginner's explanation of the browser, server, data sources, deployment and error messages.
 
 ## SPHEREx live search (introduced in 2.0.3)
 
@@ -37,9 +45,9 @@ Open http://localhost:8000. Keep all application files together. React 18 and ht
 
 ## Atlas behavior
 
-The built-in atlas supports drag/pan, wheel or pinch zoom, keyboard navigation, survey switching, exact sky-center updates and a coordinate grid. It fetches a new projected image after navigation. It does not progressively stream high-resolution tiles in the browser. The largest field dimension is limited to 60 degrees. Both `?mode=atlas` and the older `?atlas=basic` open the atlas directly.
+The built-in atlas supports drag/pan, wheel or pinch zoom, keyboard navigation, survey switching, exact sky-center updates and a coordinate grid. It fetches a new projected image after navigation. It does not progressively stream high-resolution tiles in the browser. Close views up to a 60-degree field use TAN projection. Wider views use Hammer-Aitoff; zoom width 360 fits the whole sky into the viewport, including on portrait phones. The outside of the projected ellipse is blank. Both `?mode=atlas` and the older `?atlas=basic` open the atlas directly.
 
-The renderer uses equatorial HiPS JPEG tiles and nearest-pixel sampling via Astropy HEALPix onto a TAN grid. It is a reference display, not a flux-conserving scientific reduction. It requests at most 12 tiles per view, reducing resolution if needed, with at most four tile downloads and one reprojection at a time. Tile images must be 512 by 512 JPEGs from fixed IRSA survey paths. The byte-bounded tile and map caches expire after one hour. Missing or unreadable tiles produce an explicit error and Retry map control.
+The renderer uses equatorial HiPS JPEG tiles and nearest-pixel sampling via Astropy HEALPix onto a TAN or Hammer-Aitoff grid. It is a reference display, not a flux-conserving scientific reduction. It requests at most 12 tiles per view, reducing resolution if needed, with at most four tile downloads and one reprojection at a time. Tile images must be 512 by 512 JPEGs from fixed IRSA survey paths. The byte-bounded tile and map caches expire after one hour. Missing or unreadable tiles produce an explicit error and Retry map control.
 
 ## What changed
 
@@ -74,6 +82,8 @@ https://YOUR-SITE/?ra=133.7951292&dec=-7.2451472&fov=12&band=D2&layer=wise&mode=
 
 `ra` and `dec` use decimal ICRS degrees. `fov` is the SPHEREx cutout width in arcminutes: 1, 2, 3, 6, or 12. `band` selects D1–D6, not a single calibrated spectral channel. `layer` can be `dss`, `mass`, or `wise`. `mode=sequence` loads observations on arrival. Shared coordinate URLs without it open the atlas. The bare home URL starts a live M101 sequence; `?mode=atlas` or `?atlas=basic` opens the optional atlas without an exposure search.
 
+Atlas links also include `atlas_ra`, `atlas_dec`, and `atlas_fov`. These preserve the map view independently of the selected SPHEREx coordinates. `atlas_fov` ranges from 0.01 to 360: up to 60 it is the largest TAN field dimension in degrees; above 60 it controls Hammer-Aitoff zoom, with 360 showing the whole sphere. It does not enlarge the SPHEREx cutout. A direct arbitrary-position atlas URL can use `?mode=atlas&ra=12.345&dec=-45.67`; the atlas defaults to a 6-degree surrounding field.
+
 ## Science and display limits
 
 - The colorful atlas is a telescope-band composite from a reference survey. It is not SPHEREx time-domain data and not necessarily visible-eye color. No synthetic sky or fake exposure is substituted for missing data.
@@ -95,7 +105,7 @@ node test_map_loader.cjs
 
 The Python suite tests archive retry/failure semantics, empty results, detector filtering, chronological sampling, duplicate removal, caching, coordinates, PNG orientation, and static routes. With Astropy installed it also checks an actual VOTable parse, sexagesimal resolution, and rotated-WCS alignment. The React/htm harness tests state, cancellations, playback gating, empty/error states, and shared URLs; it does not test browser layout.
 
-Validation of version 2.0.4: **59 Python tests, 16 frontend state tests, 10 atlas geometry/lifecycle tests, and 4 map lifecycle integration tests passed.** Nine unmocked browser checks cover actual atlas imagery and a live SPHEREx regression check. Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
+Validation of version 2.0.5: **63 Python tests, 22 frontend state tests, 15 atlas geometry/lifecycle tests, and 5 map lifecycle integration tests passed.** Live browser checks cover free navigation, all sky, arbitrary coordinates, RA wrapping, sharing, view restoration and phone layout; a separate live SPHEREx regression check verifies the independent cutout size. Browser and live-service verification is recorded in `VALIDATION.txt`. Regression checks use isolated fixtures and do not substitute simulated observations into the application.
 
 ## Data sources and documentation
 
