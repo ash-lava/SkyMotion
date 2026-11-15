@@ -1,4 +1,4 @@
-"""SkyMotion: a real sky atlas and WCS-aligned SPHEREx sequence viewer."""
+"""sphere360: a real sky atlas and WCS-aligned SPHEREx sequence viewer."""
 import hashlib
 import io
 import json
@@ -10,22 +10,25 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
+from datetime import date as CalendarDate
 from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, RedirectResponse
 from PIL import Image
 
 import archive_client as archive
+import comparison
+import infrared_color
 
 ROOT = Path(__file__).resolve().parent
 CACHE = Path(os.getenv('CACHE_DIR', str(ROOT / 'cache')))
 CACHE.mkdir(parents=True, exist_ok=True)
 CACHE_TTL = int(os.getenv('CACHE_TTL', '21600'))
-VERSION = '2.0.7'
-app = FastAPI(title='SkyMotion', version=VERSION)
+VERSION = '2.1.0'
+app = FastAPI(title='sphere360', version=VERSION)
 from sky_service import router as sky_router
 app.include_router(sky_router)
 STATE_LOCK = threading.RLock()
@@ -40,8 +43,8 @@ def valid_key(key):
         raise HTTPException(400, 'Invalid search key.')
 
 
-def key_for(ra, dec, fov, detector, limit):
-    query = [VERSION, archive.COLLECTIONS, ra, dec, fov, detector, limit]
+def key_for(ra, dec, fov, detector, limit, start=None, end=None):
+    query = [VERSION, archive.COLLECTIONS, ra, dec, fov, detector, limit, str(start), str(end)]
     return hashlib.sha256(json.dumps(query).encode()).hexdigest()[:24]
 
 
@@ -75,7 +78,35 @@ def read_search(key):
 
 
 def public_payload(payload):
-    return {**payload, 'observations': [{k: v for k, v in row.items() if k != 'url'} for row in payload['observations']]}
+    return {**payload, 'observations': [{**{k: v for k, v in row.items() if k != 'url'},
+                                       'archive_url': row.get('url')} for row in payload['observations']]}
+
+
+def combined_search(base, extra):
+    """Join immutable live-search snapshots, preserving independent search windows."""
+    if not base:
+        return public_payload(extra)
+    rows = list({r['url']: r for r in base['observations'] + extra['observations']}.values())
+    rows.sort(key=lambda r: (r['mjd'] if r.get('mjd') is not None else float('inf'), r['band'], r['id']))
+    total = len(rows)
+    if total > 64:
+        rows = [rows[round(i * (total - 1) / 63)] for i in range(64)]
+    fields = ('date_range', 'queried_at', 'search_method', 'query_limits', 'sampling_limited')
+    windows = base.get('search_windows', [{k: base.get(k) for k in fields}])
+    windows = windows + [{k: extra.get(k) for k in fields}]
+    warnings = list(dict.fromkeys(base['warnings'] + extra['warnings']))
+    if total > 64:
+        warnings.append('Combined searches exceed 64 frames; 64 were selected across the returned dates.')
+    times = [r['mjd'] for r in rows if r.get('mjd') is not None]
+    key = hashlib.sha256((VERSION + base['key'] + extra['key'] + json.dumps(rows, sort_keys=True)).encode()).hexdigest()[:24]
+    payload = {**extra, 'key': key, 'observations': rows, 'total': total, 'warnings': warnings,
+               'search_windows': windows, 'collections': sorted(set(base['collections'] + extra['collections'])),
+               'search_method': ' + '.join(dict.fromkeys((base['search_method'], extra['search_method']))),
+               'sampling_limited': base.get('sampling_limited', False) or extra.get('sampling_limited', False) or total > 64,
+               'total_lower_bound': base.get('total_lower_bound', False) or extra.get('total_lower_bound', False) or total > 64,
+               'time_span_days': max(times) - min(times) if times else None}
+    write_cache(key, payload)
+    return public_payload(payload)
 
 
 @app.get('/api/health')
@@ -94,23 +125,36 @@ def archive_status():
 @app.get('/api/observations')
 def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
                  fov: float = Query(3, ge=1, le=12), detector: str = 'D2',
-                 limit: int = Query(24, ge=2, le=64), refresh: bool = False):
+                 limit: int = Query(24, ge=2, le=64), refresh: bool = False,
+                 start: CalendarDate | None = None, end: CalendarDate | None = None,
+                 append: str | None = None):
     if detector not in ('all', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6'):
         raise HTTPException(400, 'Choose a detector from D1 to D6.')
-    lookup_key = key_for(ra, dec, fov, detector, limit)
+    if start and end and start > end:
+        raise HTTPException(400, 'Start date must be on or before end date (UTC).')
+    anchor = CalendarDate(1858, 11, 17).toordinal()
+    time_range = ((start.toordinal() - anchor) if start else None,
+                  (end.toordinal() + 1 - anchor) if end else None) if start or end else None
+    base = read_search(append) if append else None
+    if base and any(base.get(k) != value for k, value in (('ra', ra), ('dec', dec), ('fov_arcmin', fov), ('detector', detector))):
+        raise HTTPException(400, 'Additional dates must use the same coordinates, field and detector.')
+    if base and len(base.get('search_windows', [])) >= 20:
+        raise HTTPException(400, 'This sequence already combines 20 searches. Start a new sequence.')
+    lookup_key = key_for(ra, dec, fov, detector, limit, start, end)
     if not refresh:
         try:
             cached_key = (CACHE / f'{lookup_key}.ref').read_text().strip()
             path = CACHE / f'{cached_key}.json'
             if time.time() - path.stat().st_mtime < CACHE_TTL:
-                return public_payload(read_search(cached_key))
+                return combined_search(base, read_search(cached_key))
         except (OSError, HTTPException):
             pass
     diagnostics = {}
     try:
         # A bounded live search finds footprints covering the center; fov sets cutout width.
         rows, total, warnings, live, failed = archive.search(
-            ra, dec, fov * math.sqrt(2) / 120, detector, limit, diagnostics=diagnostics)
+            ra, dec, fov * math.sqrt(2) / 120, detector, limit, diagnostics=diagnostics,
+            **({'time_range': time_range} if time_range else {}))
     except archive.ArchiveError as exc:
         with STATE_LOCK:
             STATUS.update(checked=time.time(), live=[], unavailable=diagnostics.get('unavailable') or {c: str(exc) for c in archive.COLLECTIONS},
@@ -122,12 +166,15 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
                       tap=diagnostics.get('tap'), search_method=method)
     # A changed set/order of artifacts gets new frame URLs, even for identical field settings.
     key = hashlib.sha256((lookup_key + json.dumps(rows, sort_keys=True)).encode()).hexdigest()[:24]
+    times = [r['mjd'] for r in rows if r.get('mjd') is not None]
     payload = {'key': key, 'observations': rows, 'total': total, 'warnings': warnings,
                'source': 'NASA/IPAC IRSA SPHEREx', 'search_method': method, 'real': True,
                'ra': ra, 'dec': dec, 'fov_arcmin': fov, 'detector': detector,
                'collections': live, 'sampling_limited': diagnostics.get('sampling_limited', False),
                'total_lower_bound': bool(failed) or diagnostics.get('sampling_limited', False),
                'query_limits': diagnostics.get('query_limits', {}), 'queried_at': time.time(),
+               'date_range': {'start': start.isoformat() if start else None, 'end': end.isoformat() if end else None, 'timezone': 'UTC'},
+               'time_span_days': max(times) - min(times) if times else None,
                'alignment': 'Common north-up, east-left ICRS TAN grid; bilinear interpolation.'}
     write_cache(key, payload)
     ref = CACHE / f'{lookup_key}.ref'
@@ -141,7 +188,7 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
     else:
         # Preserve partial snapshots for their loaded frames, but retry the next search.
         ref.unlink(missing_ok=True)
-    return public_payload(payload)
+    return combined_search(base, payload)
 
 
 def target_wcs(ra, dec, fov):
@@ -196,16 +243,32 @@ def image_data(key, index):
                 raise archive.ArchiveError('The cutout has no sky coordinates; it cannot be aligned safely.')
             grid = target_wcs(data['ra'], data['dec'], data['fov_arcmin'])
             array = align_array(np.asarray(science.data, dtype=np.float32), source_wcs, grid)
-            info = {'wavelength_um': None, 'flagged_fraction': None, 'version': str(hdus[0].header.get('VERSION', ''))}
+            info = {'wavelength_um': None, 'bandwidth_um': None, 'flagged_fraction': None,
+                    'unit': None, 'native_unit': str(science.header.get('BUNIT', '')),
+                    'version': str(hdus[0].header.get('VERSION', ''))}
+            try:
+                factor = u.Unit(info['native_unit']).to(u.MJy / u.sr)
+                array *= factor
+                info['unit'] = 'MJy/sr'
+            except (ValueError, TypeError):
+                pass
             center = SkyCoord(data['ra'], data['dec'], unit='deg')
             try:
                 x, y = source_wcs.world_to_pixel(center)
                 spectral = WCS(science.header, fobj=hdus, key='W')
                 spectral.sip = None
-                wavelength, _ = spectral.pixel_to_world(x, y)
+                wavelength, bandwidth = spectral.pixel_to_world(x, y)
                 wave = float(wavelength.to_value(u.um))
                 if math.isfinite(wave):
                     info['wavelength_um'] = wave
+                width = float(bandwidth.to_value(u.um))
+                if math.isfinite(width) and width > 0:
+                    info['bandwidth_um'] = width
+                yy, xx = np.indices((SIZE, SIZE), dtype=float)
+                sx, sy = source_wcs.world_to_pixel(grid.pixel_to_world(xx, yy))
+                waves, widths = spectral.pixel_to_world(sx, sy)
+                info['_wavelength_map'] = np.asarray(waves.to_value(u.um), dtype=np.float32)
+                info['_bandwidth_map'] = np.asarray(widths.to_value(u.um), dtype=np.float32)
             except Exception:
                 pass  # Do not invent wavelengths for products without usable spectral WCS.
             if 'FLAGS' in hdus and hdus['FLAGS'].data is not None:
@@ -260,11 +323,119 @@ def frame(key: str, index: int):
 def frame_info(key: str, index: int):
     array, row, _, info = get_image(key, index)
     valid_pixels = int(np.isfinite(array).sum())
-    return {**{k: v for k, v in row.items() if k != 'url'}, **info,
+    return {**{k: v for k, v in row.items() if k != 'url'}, **{k: v for k, v in info.items() if not k.startswith('_')},
             'coverage': valid_pixels / array.size, 'valid_pixels': valid_pixels,
             'missing_pixels': int(array.size - valid_pixels), 'total_pixels': int(array.size),
             'coverage_definition': 'Fraction of the aligned patch with finite science values; quality flags are separate.',
             'stretch': 'Independent 5–99.5 percentile square-root stretch.'}
+
+
+@app.get('/api/cutout/{key}/{index}')
+def original_cutout(key: str, index: int):
+    data = read_search(key)
+    if index < 0 or index >= len(data['observations']):
+        raise HTTPException(404, 'Exposure not found.')
+    url = data['observations'][index]['url']
+    if not archive.safe_image_url(url):
+        raise HTTPException(400, 'Invalid archive image link.')
+    from urllib.parse import urlencode
+    params = urlencode({'center': f"{data['ra']:.8f},{data['dec']:.8f}d", 'size': f"{data['fov_arcmin'] * 1.5 / 60:.8f}"})
+    return RedirectResponse(url + '?' + params, headers={'Cache-Control': 'no-store'})
+
+
+def comparison_data(key, a, b, background):
+    try:
+        return comparison.prepare(get_image(key, a), get_image(key, b), a, b, background=background)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.get('/api/comparison/{key}')
+def compare_info(key: str, a: int = Query(..., ge=0), b: int = Query(..., ge=0), background: bool = True):
+    result = comparison_data(key, a, b, background)
+    data = read_search(key)
+    return {**result['metadata'], 'key': key, 'source': 'NASA/IPAC IRSA SPHEREx',
+            'ra': data['ra'], 'dec': data['dec'], 'fov_arcmin': data['fov_arcmin']}
+
+
+@app.get('/api/comparison/{key}/image.png')
+def compare_image(key: str, a: int = Query(..., ge=0), b: int = Query(..., ge=0),
+                  view: str = 'a', background: bool = True):
+    if view not in ('a', 'b', 'difference', 'mean'):
+        raise HTTPException(400, 'Choose A, B, difference or mean.')
+    try:
+        raw = comparison.png(comparison_data(key, a, b, background), view)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return Response(raw, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/comparison/{key}/data.fits')
+def compare_fits(key: str, a: int = Query(..., ge=0), b: int = Query(..., ge=0),
+                 operation: str = 'difference', background: bool = True):
+    if operation not in ('difference', 'mean'):
+        raise HTTPException(400, 'Choose difference or mean.')
+    result = comparison_data(key, a, b, background)
+    metadata = result['metadata']
+    if not metadata['arithmetic_available']:
+        raise HTTPException(422, ' '.join(metadata['reasons']))
+    from astropy.io import fits
+    header = result['grid'].to_header()
+    header['BUNIT'] = 'MJy/sr'
+    header['CREATOR'] = 'sphere360 ' + VERSION
+    header['OPERAT'] = operation
+    header['BGSUB'] = background
+    header['BG_A'] = metadata['background_a']
+    header['BG_B'] = metadata['background_b']
+    header['SRC_A'] = str(metadata['a']['id'])
+    header['SRC_B'] = str(metadata['b']['id'])
+    header['HISTORY'] = metadata['wavelength_rule']
+    header['HISTORY'] = 'Quick-look only. No PSF matching, error propagation or flag rejection.'
+    buffer = io.BytesIO()
+    fits.HDUList([fits.PrimaryHDU(result[operation].astype(np.float32), header),
+                  fits.ImageHDU(result['mask'].astype(np.uint8), name='VALID')]).writeto(buffer)
+    return Response(buffer.getvalue(), media_type='application/fits',
+                    headers={'Content-Disposition': f'attachment; filename="sphere360-{operation}.fits"', 'Cache-Control': 'no-store'})
+
+
+def color_data(red_key, red_index, green_key, green_index, blue_key, blue_index, allow_mixed_dates):
+    keys=(red_key,green_key,blue_key)
+    searches=[read_search(key) for key in keys]
+    field=tuple(searches[0][k] for k in ('ra','dec','fov_arcmin'))
+    if any(tuple(data[k] for k in ('ra','dec','fov_arcmin'))!=field for data in searches[1:]):
+        raise HTTPException(400, 'Color channels must use the same sky coordinates and cutout size.')
+    indices=(red_index,green_index,blue_index)
+    for data,index in zip(searches,indices):
+        if index < 0 or index >= len(data['observations']):
+            raise HTTPException(404,'Color exposure not found.')
+    times=[data['observations'][index].get('mjd') for data,index in zip(searches,indices)]
+    if all(isinstance(v,(int,float)) and math.isfinite(v) for v in times):
+        span=max(times)-min(times)
+        if span>1 and not allow_mixed_dates:
+            raise HTTPException(422,f'These channels are {span:.2f} days apart. Choose closer dates or explicitly allow mixed dates.')
+    entries=[get_image(key,index) for key,index in zip(keys,indices)]
+    try:
+        raw,metadata=infrared_color.prepare(entries,indices,allow_mixed_dates=allow_mixed_dates)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc))
+    for label,key in zip(('red','green','blue'),keys):
+        metadata['channels'][label]['key']=key
+    return raw,{**metadata,'ra':field[0],'dec':field[1],'fov_arcmin':field[2]}
+
+
+@app.get('/api/color')
+def color_info(red_key: str, green_key: str, blue_key: str,
+               red_index: int = Query(...,ge=0), green_index: int = Query(...,ge=0), blue_index: int = Query(...,ge=0),
+               allow_mixed_dates: bool = False):
+    return color_data(red_key,red_index,green_key,green_index,blue_key,blue_index,allow_mixed_dates)[1]
+
+
+@app.get('/api/color/image.png')
+def color_image(red_key: str, green_key: str, blue_key: str,
+                red_index: int = Query(...,ge=0), green_index: int = Query(...,ge=0), blue_index: int = Query(...,ge=0),
+                allow_mixed_dates: bool = False):
+    raw,_=color_data(red_key,red_index,green_key,green_index,blue_key,blue_index,allow_mixed_dates)
+    return Response(raw,media_type='image/png',headers={'Cache-Control':'no-store'})
 
 
 def gaia_stars(ra, dec, radius):
@@ -363,7 +534,7 @@ def resolve(q: str = Query(..., min_length=2, max_length=100)):
     except Exception:
         raise HTTPException(404, 'Target not found. Try a SIMBAD name or coordinates such as 133.79513, -7.24515.')
 
-ASSETS = {'app.js', 'sky-atlas.js', 'style.css', 'react.production.min.js', 'react-dom.production.min.js', 'htm.js'}
+ASSETS = {'app.js', 'color-view.js', 'comparison-view.js', 'sky-atlas.js', 'style.css', 'react.production.min.js', 'react-dom.production.min.js', 'htm.js'}
 
 @app.get('/static/{name}')
 @app.get('/static/vendor/{name}')

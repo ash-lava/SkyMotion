@@ -1,0 +1,513 @@
+{
+  "version": "2.1.0",
+  "checked_utc_date": "2026-11-15",
+  "scope": "Local release validation against actual public archive services; not a production deployment or confirmation of source detections.",
+  "targets": [
+    {
+      "target": "barnard",
+      "ra": 269.4521,
+      "dec": 4.6934,
+      "fov_arcmin": 12.0,
+      "detector": "D2",
+      "sample_count": 16,
+      "sample_limited": true,
+      "search_method": "SIA2",
+      "queried_at": 1794766763.7417324,
+      "frames": [
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W34_2B_0090_4",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60908.981929,
+            "date": "2025-08-21T23:33:58.665600Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.0914532744085341,
+            "bandwidth_um": 0.024889025894634424,
+            "flagged_fraction": 0.9975166847741735,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.6991102430555556,
+            "valid_pixels": 25772,
+            "missing_pixels": 11092,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W34_2B/l2b-v27-2026-229/2/level2_2025W34_2B_0090_4D2_spx_l2b-v27-2026-229.fits"
+        },
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W35_2A_0221_2",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60916.657572,
+            "date": "2025-08-29T15:46:54.220800Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.3806746393453364,
+            "bandwidth_um": 0.03307036639839684,
+            "flagged_fraction": 0.9930787395163261,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9994303385416666,
+            "valid_pixels": 36843,
+            "missing_pixels": 21,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W35_2A/l2b-v27-2026-231/2/level2_2025W35_2A_0221_2D2_spx_l2b-v27-2026-231.fits"
+        }
+      ]
+    },
+    {
+      "target": "epsilon-indi",
+      "ra": 331.0441466,
+      "dec": -56.7828442,
+      "fov_arcmin": 6.0,
+      "detector": "D2",
+      "sample_count": 4,
+      "sample_limited": true,
+      "search_method": "SIA2",
+      "queried_at": 1794766763.9535093,
+      "frames": [
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W17_4B_0017_1",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60789.855522,
+            "date": "2025-04-24T20:31:57.100800Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.5559819082439978,
+            "bandwidth_um": 0.03795539312472131,
+            "flagged_fraction": 1.0,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9989691840277778,
+            "valid_pixels": 36826,
+            "missing_pixels": 38,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W17_4B/l2b-v27-2026-196/2/level2_2025W17_4B_0017_1D2_spx_l2b-v27-2026-196.fits"
+        },
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W17_4B_0027_4",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60789.925089,
+            "date": "2025-04-24T22:12:07.689600Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.1291399304340637,
+            "bandwidth_um": 0.026453231903165828,
+            "flagged_fraction": 1.0,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 1.0,
+            "valid_pixels": 36864,
+            "missing_pixels": 0,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W17_4B/l2b-v27-2026-196/2/level2_2025W17_4B_0027_4D2_spx_l2b-v27-2026-196.fits"
+        }
+      ]
+    },
+    {
+      "target": "wise0855",
+      "ra": 133.7951292,
+      "dec": -7.2451472,
+      "fov_arcmin": 12.0,
+      "detector": "D6",
+      "sample_count": 4,
+      "sample_limited": true,
+      "search_method": "SIA2",
+      "queried_at": 1794766821.6695747,
+      "frames": [
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W19_1B_0116_1",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D6",
+            "mjd": 60800.700028,
+            "date": "2025-05-05T16:48:02.419200Z",
+            "em_min": 4.4115e-06,
+            "em_max": 5.0096e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 4.968420943008667,
+            "bandwidth_um": 0.0371862401694295,
+            "flagged_fraction": 0.4190196398454926,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9972330729166666,
+            "valid_pixels": 36762,
+            "missing_pixels": 102,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_1B/l2b-v27-2026-197/6/level2_2025W19_1B_0116_1D6_spx_l2b-v27-2026-197.fits"
+        },
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W46_1A_0075_4",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D6",
+            "mjd": 60989.296807,
+            "date": "2025-11-10T07:07:24.124800Z",
+            "em_min": 4.4115e-06,
+            "em_max": 5.0096e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 4.416262020938074,
+            "bandwidth_um": 0.037222330187645244,
+            "flagged_fraction": 0.4233485060690943,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9296875,
+            "valid_pixels": 34272,
+            "missing_pixels": 2592,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W46_1A/l2b-v27-2026-206/6/level2_2025W46_1A_0075_4D6_spx_l2b-v27-2026-206.fits"
+        }
+      ]
+    },
+    {
+      "target": "rw-aur",
+      "ra": 76.956526,
+      "dec": 30.4014382,
+      "fov_arcmin": 3.0,
+      "detector": "D2",
+      "sample_count": 4,
+      "sample_limited": true,
+      "search_method": "SIA2",
+      "queried_at": 1794767523.1440194,
+      "frames": [
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W37_1A_0068_1",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60926.275136,
+            "date": "2025-09-08T06:36:11.750400Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.441106469190381,
+            "bandwidth_um": 0.03522324243780052,
+            "flagged_fraction": 0.9905870225694444,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 1.0,
+            "valid_pixels": 36864,
+            "missing_pixels": 0,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W37_1A/l2b-v27-2026-235/2/level2_2025W37_1A_0068_1D2_spx_l2b-v27-2026-235.fits"
+        },
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W37_1A_0068_4",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60926.279612,
+            "date": "2025-09-08T06:42:38.476800Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.5482609358312822,
+            "bandwidth_um": 0.03771790781611632,
+            "flagged_fraction": 0.9905870225694444,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 1.0,
+            "valid_pixels": 36864,
+            "missing_pixels": 0,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W37_1A/l2b-v27-2026-235/2/level2_2025W37_1A_0068_4D2_spx_l2b-v27-2026-235.fits"
+        }
+      ]
+    },
+    {
+      "target": "r-dra",
+      "ra": 248.1676075,
+      "dec": 66.7549842,
+      "fov_arcmin": 3.0,
+      "detector": "D2",
+      "sample_count": 16,
+      "sample_limited": true,
+      "search_method": "SIA2",
+      "queried_at": 1794766793.356327,
+      "frames": [
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W23_2B_0696_1",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60834.787751,
+            "date": "2025-06-08T18:54:21.686400Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.40471787476538,
+            "bandwidth_um": 0.03371732003162849,
+            "flagged_fraction": 1.0,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9819607204861112,
+            "valid_pixels": 36199,
+            "missing_pixels": 665,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W23_2B/l2b-v27-2026-201/2/level2_2025W23_2B_0696_1D2_spx_l2b-v27-2026-201.fits"
+        },
+        {
+          "metadata_status": 200,
+          "image_status": 200,
+          "metadata": {
+            "id": "2025W24_2D_0534_4",
+            "collection": "spherex_dr1",
+            "band": "SPHEREx-D2",
+            "mjd": 60841.450343,
+            "date": "2025-06-15T10:48:29.635200Z",
+            "em_min": 1.1033e-06,
+            "em_max": 1.6499e-06,
+            "exptime": 113.5826,
+            "wavelength_um": 1.3723418302486374,
+            "bandwidth_um": 0.03292692007130617,
+            "flagged_fraction": 1.0,
+            "unit": "MJy/sr",
+            "native_unit": "MJy / sr",
+            "version": "7.0.5",
+            "coverage": 0.9704047309027778,
+            "valid_pixels": 35773,
+            "missing_pixels": 1091,
+            "total_pixels": 36864,
+            "coverage_definition": "Fraction of the aligned patch with finite science values; quality flags are separate.",
+            "stretch": "Independent 5\u201399.5 percentile square-root stretch."
+          },
+          "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W24_2D/l2b-v27-2026-202/2/level2_2025W24_2D_0534_4D2_spx_l2b-v27-2026-202.fits"
+        }
+      ]
+    }
+  ],
+  "color_example": {
+    "false_color": true,
+    "source": "NASA/IPAC IRSA SPHEREx",
+    "time_span_days": 11.952612000000954,
+    "mixed_dates_allowed": true,
+    "coverage": 0.9985080295138888,
+    "channels": {
+      "red": {
+        "source_index": 3,
+        "id": "2025W19_2B_0399_1",
+        "date": "2025-05-11T01:15:09.216000Z",
+        "mjd": 60806.05219,
+        "band": "SPHEREx-D6",
+        "collection": "spherex_dr1",
+        "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_2B/l2b-v27-2026-198/6/level2_2025W19_2B_0399_1D6_spx_l2b-v27-2026-198.fits",
+        "wavelength_um": 4.993841587565689,
+        "bandwidth_um": 0.0361360189196821,
+        "unit": "MJy/sr",
+        "version": "7.0.5",
+        "flagged_fraction": 0.9998641636556277,
+        "limits": [
+          0.5380036950111389,
+          3.126213674545281
+        ],
+        "key": "cf7a1309660f4f403d1ae506"
+      },
+      "green": {
+        "source_index": 3,
+        "id": "2025W19_2B_0346_4",
+        "date": "2025-05-10T17:11:04.560000Z",
+        "mjd": 60805.716025,
+        "band": "SPHEREx-D2",
+        "collection": "spherex_dr1",
+        "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_2B/l2b-v27-2026-198/2/level2_2025W19_2B_0346_4D2_spx_l2b-v27-2026-198.fits",
+        "wavelength_um": 1.6180626588637868,
+        "bandwidth_um": 0.03883507584847812,
+        "unit": "MJy/sr",
+        "version": "7.0.5",
+        "flagged_fraction": 0.9996473524305556,
+        "limits": [
+          0.5995523452758789,
+          5.7821625900268545
+        ],
+        "key": "2f5161cd254aca72e7362f9d"
+      },
+      "blue": {
+        "source_index": 0,
+        "id": "2025W21_2C_0029_1",
+        "date": "2025-05-22T16:02:50.236800Z",
+        "mjd": 60817.668637,
+        "band": "SPHEREx-D1",
+        "collection": "spherex_dr1",
+        "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W21_2C/l2b-v27-2026-199/1/level2_2025W21_2C_0029_1D1_spx_l2b-v27-2026-199.fits",
+        "wavelength_um": 0.9905724551026259,
+        "bandwidth_um": 0.02584379799998415,
+        "unit": "MJy/sr",
+        "version": "7.0.5",
+        "flagged_fraction": 0.9998101128472222,
+        "limits": [
+          0.4808500647544861,
+          4.138257198333733
+        ],
+        "key": "9ea026bb1ce2d7eb77159e51"
+      }
+    },
+    "stretch": "Each channel: 5\u201399.5 percentile square-root stretch, measured in the common valid area.",
+    "missing_pixels": "Only pixels finite in all three exposures are displayed. No gap filling.",
+    "warnings": [
+      "Visible red, green and blue are assigned to measured infrared bands; they are not visible-eye colors.",
+      "Channel wavelengths vary across the patch. Dates, PSF, noise, flags and independent channel stretches affect the colors.",
+      "Quality-flagged pixels are retained. Inspect the original FITS files for scientific use.",
+      "The channels were observed on different dates. This composite is not one moment in time; motion or variability can create colored features."
+    ],
+    "ra": 210.80227,
+    "dec": 54.34895,
+    "fov_arcmin": 6
+  },
+  "comparison_example": {
+    "a": {
+      "source_index": 2,
+      "id": "2025W19_1B_0138_1",
+      "date": "2025-05-05T20:01:35.443200Z",
+      "mjd": 60800.834438,
+      "band": "SPHEREx-D6",
+      "collection": "spherex_dr1",
+      "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W19_1B/l2b-v27-2026-197/6/level2_2025W19_1B_0138_1D6_spx_l2b-v27-2026-197.fits",
+      "wavelength_um": 4.8609346534810705,
+      "bandwidth_um": 0.03796743245023723,
+      "unit": "MJy/sr",
+      "version": "7.0.5",
+      "flagged_fraction": 0.4238360255192073
+    },
+    "b": {
+      "source_index": 17,
+      "id": "2025W46_2A_0226_2",
+      "date": "2025-11-14T13:49:04.108800Z",
+      "mjd": 60993.575742,
+      "band": "SPHEREx-D6",
+      "collection": "spherex_dr1",
+      "archive_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W46_2A/l2b_retry-v27-2026-207/6/level2_2025W46_2A_0226_2D6_spx_l2b_retry-v27-2026-207.fits",
+      "wavelength_um": 4.872698041510737,
+      "bandwidth_um": 0.0373096331089607,
+      "unit": "MJy/sr",
+      "version": "7.0.5",
+      "flagged_fraction": 0.42808247086627005
+    },
+    "time_separation_days": 192.74130400000286,
+    "arithmetic_available": true,
+    "reasons": [],
+    "common_coverage": 0.9978298611111112,
+    "wavelength_matched_coverage": 0.5212131076388888,
+    "displayed_coverage": 0.5212131076388888,
+    "background_removed": true,
+    "background_a": 0.6494933366775513,
+    "background_b": 0.7026124000549316,
+    "unit": "MJy/sr",
+    "shared_limits": [
+      -0.08062419593334198,
+      0.5646860438585022
+    ],
+    "difference_limits": [
+      -2.676896333694458,
+      2.676896333694458
+    ],
+    "wavelength_rule": "Same detector; center and each arithmetic pixel within half the narrower spectral-WCS channel width.",
+    "stretch": "A, B and mean: shared 5\u201399.5 percentile square-root stretch. Difference: linear, symmetric 99.5 percentile of absolute residual.",
+    "difference_definition": "B minus A",
+    "mean_definition": "(A + B) / 2; moving or variable sources may blur.",
+    "mask_definition": "Intersection of finite science coverage. Arithmetic also requires local wavelength agreement; all other pixels remain missing.",
+    "warnings": [
+      "Quick-look comparison: no PSF matching, uncertainty propagation or significance test. Small wavelength differences, noise, flags and processing changes can leave residuals.",
+      "Quality-flagged pixels are retained. Inspect the flag fractions and original FITS flags.",
+      "Each image has its median over the displayed common area removed. This suppresses uniform sky changes; it does not remove structured zodiacal light."
+    ],
+    "key": "994d475f3a16f2d74da95d86",
+    "source": "NASA/IPAC IRSA SPHEREx",
+    "ra": 133.7951292,
+    "dec": -7.2451472,
+    "fov_arcmin": 12
+  },
+  "checks": {
+    "python": 99,
+    "frontend_state": 36,
+    "atlas": 15,
+    "map_lifecycle": 5,
+    "browser_scenarios": [
+      "Real cached live Barnard search, actual FITS image, new name",
+      "Wavelength-incompatible pair blocks arithmetic",
+      "Blink waits for both actual images",
+      "Comparison modal has no horizontal overflow at 320\u20131440px",
+      "Main sequence controls fit above timeline at 320\u20131440px",
+      "Color configuration modal fits phone and desktop",
+      "Coordinate URL loads inside an iframe",
+      "Mixed-date RGB blocked until explicit option selected",
+      "Live IRSA D6/D2/D1 searches and actual three-channel FITS color PNG",
+      "Color image, provenance, missing-data legend and downloads on phone and desktop",
+      "Shared multiple-date URL rebuilds immutable combined sequence",
+      "Live wavelength-checked multi-season difference and two-image average",
+      "Difference FITS and JSON preserve source identity, units, masks and background settings",
+      "Final backend re-downloads actual pair, matches spectral mask and PNG alpha",
+      "Final color backend re-downloads actual channels and enforces mixed-date gate",
+      "Blink readiness survives repeated view changes on the final JavaScript",
+      "Test-only delayed color requests cannot populate a cancelled search"
+    ]
+  },
+  "availability": {
+    "irsa": "Intermittent HTTP 502; successful metadata and FITS checks are recorded above. Samples remain limited.",
+    "gaia_dr3": "Live ESA TAP/overlay check returned 502.",
+    "color_green": "D3 intermittently failed; the live color browser check selected D2 as supported green-channel alternative."
+  },
+  "test_isolation": "Science/browser image checks used real IRSA data. One test-only delayed request verified color-search cancellation. Fixtures/mocks never supply runtime sky data."
+}

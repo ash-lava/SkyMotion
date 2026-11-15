@@ -38,7 +38,7 @@ def fetch_bytes(url, params=None, *, timeout=35, max_bytes=16_000_000, attempts=
     for attempt in range(attempts):
         try:
             with httpx.Client(timeout=httpx.Timeout(timeout, connect=10), follow_redirects=False,
-                              headers={'User-Agent': 'SkyMotion/2.0 (public SPHEREx explorer)'}) as client:
+                              headers={'User-Agent': 'sphere360/2.1 (public SPHEREx explorer)'}) as client:
                 with client.stream('GET', url, params=params) as response:
                     response.raise_for_status()
                     chunks, size = [], 0
@@ -125,13 +125,31 @@ def read_csv_table(raw, required, cap):
 def read_sia_csv(raw, cap):
     return read_csv_table(raw, ('access_url', 'energy_bandpassname', 't_min'), cap)
 
-def get_table(ra, dec, radius, collection, *, detector='all'):
+def time_constraints(time_range):
+    if time_range is None:
+        return {}
+    import math
+    lower, upper = time_range
+    if any(v is not None and not math.isfinite(v) for v in (lower, upper)) or (
+            lower is not None and upper is not None and lower >= upper):
+        raise ArchiveError('Choose a valid, increasing UTC date range.')
+    return {'TIME': f"{lower if lower is not None else '-Inf'} {upper if upper is not None else '+Inf'}"}
+
+
+def within_time(mjd, time_range):
+    if time_range is None:
+        return True
+    lower, upper = time_range
+    return mjd is not None and (lower is None or mjd >= lower) and (upper is None or mjd < upper)
+
+
+def get_table(ra, dec, radius, collection, *, detector='all', time_range=None):
     # Find frames covering the requested center. Field width applies to the FITS cutout.
     # Large/unbounded searches failed at IRSA's proxy in live checks; 16/4-row CSV
     # requests worked. Successful requests took ~21s, so a 15s timeout is insufficient.
     params = {'COLLECTION': collection,
               'POS': f'CIRCLE {float(ra):.12g} {float(dec):.12g} 0.00001',
-              'RESPONSEFORMAT': 'CSV'}
+              'RESPONSEFORMAT': 'CSV', **time_constraints(time_range)}
     if detector != 'all' and detector not in DETECTOR_BANDS:
         raise ArchiveError('Choose a detector from D1 to D6, or all.')
     error = None
@@ -195,7 +213,7 @@ def date_from_mjd(value):
     except (ValueError, OverflowError):
         return ''
 
-def tap_rows(ra, dec, detector):
+def tap_rows(ra, dec, detector, *, time_range=None):
     """IRSA's documented artifact/plane query; it selects images covering the center.
 
     TAP combines wide/deep products within each requested release family. We report
@@ -204,10 +222,18 @@ def tap_rows(ra, dec, detector):
     band = '' if detector == 'all' else f" AND p.energy_bandpassname = 'SPHEREx-{detector}'"
     families = {c.removesuffix('_deep').removeprefix('spherex_') for c in COLLECTIONS}
     releases = ' OR '.join(f"a.uri LIKE '%/spherex/{release}/level2/%'" for release in sorted(families))
+    time_constraints(time_range)
+    time_filter = ''
+    if time_range is not None:
+        lower, upper = time_range
+        if lower is not None:
+            time_filter += f' AND p.time_bounds_lower >= {lower:.12g}'
+        if upper is not None:
+            time_filter += f' AND p.time_bounds_lower < {upper:.12g}'
     query = f"""SELECT TOP {TAP_LIMIT} a.uri, p.time_bounds_lower, p.energy_bandpassname
         FROM spherex.artifact a JOIN spherex.plane p ON a.planeid = p.planeid
         WHERE 1=CONTAINS(POINT('ICRS', {ra:.8f}, {dec:.8f}), p.poly)
-        {band} AND ({releases}) ORDER BY p.time_bounds_lower"""
+        {band} {time_filter} AND ({releases}) ORDER BY p.time_bounds_lower"""
     raw = fetch_bytes(TAP_URL, {'REQUEST': 'doQuery', 'LANG': 'ADQL', 'FORMAT': 'csv',
                                'QUERY': query, 'MAXREC': TAP_LIMIT}, timeout=45, attempts=1)
     table, overflow = read_csv_table(raw, ('uri', 'time_bounds_lower', 'energy_bandpassname'), TAP_LIMIT)
@@ -222,19 +248,23 @@ def tap_rows(ra, dec, detector):
         if release not in families or (detector != 'all' and bandpass.upper() != f'SPHEREX-{detector}'):
             continue
         mjd = number_value(item, 'time_bounds_lower')
+        if not within_time(mjd, time_range):
+            continue
         rows.append({'id': urlparse(url).path.rsplit('/', 1)[-1].removesuffix('.fits'),
                      'collection': 'spherex_' + release, 'band': bandpass,
                      'mjd': mjd, 'date': date_from_mjd(mjd), 'url': url,
                      'em_min': None, 'em_max': None, 'exptime': None})
     return rows, overflow
 
-def search(ra, dec, radius, detector, limit, *, diagnostics=None):
+def search(ra, dec, radius, detector, limit, *, diagnostics=None, time_range=None):
     """Return rows and collection outcomes; optionally record the separate TAP outcome."""
     rows, warnings, failed, successful = [], [], {}, []
     outcomes = diagnostics if diagnostics is not None else {}
+    time_constraints(time_range)
+    options = {'time_range': time_range} if time_range is not None else {}
     outcomes.update(method='SIA2', tap=None, sampling_limited=False, query_limits={})
     with ThreadPoolExecutor(max_workers=min(4, len(COLLECTIONS))) as pool:
-        futures = {pool.submit(get_table, ra, dec, radius, c, detector=detector): c for c in COLLECTIONS}
+        futures = {pool.submit(get_table, ra, dec, radius, c, detector=detector, **options): c for c in COLLECTIONS}
         for future in as_completed(futures):
             collection = futures[future]
             try:
@@ -254,6 +284,8 @@ def search(ra, dec, radius, detector, limit, *, diagnostics=None):
                     if not safe_image_url(url):
                         continue
                     mjd = number_value(row, 't_min')
+                    if not within_time(mjd, time_range):
+                        continue
                     rows.append({'id': text_value(row, 'obs_id'), 'collection': collection,
                         'band': band, 'mjd': mjd, 'date': date_from_mjd(mjd), 'url': url,
                         'em_min': number_value(row, 'em_min'), 'em_max': number_value(row, 'em_max'),
@@ -266,7 +298,7 @@ def search(ra, dec, radius, detector, limit, *, diagnostics=None):
     outcomes['unavailable'] = dict(failed)
     if failed:
         try:
-            fallback, overflow = tap_rows(ra, dec, detector)
+            fallback, overflow = tap_rows(ra, dec, detector, **options)
             rows.extend(fallback)
             outcomes.update(method='SIA2 + TAP' if successful else 'TAP', tap={'ok': True, 'error': None})
             warnings.append('IRSA TAP supplied an alternative search covering the field center. '

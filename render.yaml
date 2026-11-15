@@ -3,7 +3,7 @@ services:
     name: skymotion
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt && python -m unittest -q test_server.py
+    buildCommand: pip install -r requirements.txt && python -m unittest -q test_server.py test_search_dates.py test_comparison.py test_infrared_color.py
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
